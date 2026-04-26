@@ -78,12 +78,12 @@ class _FakeSpeechToText extends Fake implements SpeechToText {
 void main() {
   late _FakeSpeechToText fakeSpeech;
   late VoiceService voiceService;
-  late StreamController<String> controller;
+  late StreamController<VoiceTranscription> controller;
 
   setUp(() {
     fakeSpeech = _FakeSpeechToText();
     fakeSpeech.available = true;
-    controller = StreamController<String>.broadcast();
+    controller = StreamController<VoiceTranscription>.broadcast();
     voiceService = VoiceService(
       speechToText: fakeSpeech,
       transcriptionController: controller,
@@ -131,13 +131,14 @@ void main() {
       await voiceService.initialize();
       await voiceService.startListening();
 
-      final emitted = <String>[];
+      final emitted = <VoiceTranscription>[];
       final sub = voiceService.transcriptionStream.listen(emitted.add);
 
       fakeSpeech.emitResult('Hello world');
       await Future<void>.delayed(Duration.zero);
 
-      expect(emitted, contains('Hello world'));
+      expect(emitted.single.text, 'Hello world');
+      expect(emitted.single.isFinal, isTrue);
       await sub.cancel();
     });
 
@@ -145,14 +146,15 @@ void main() {
       await voiceService.initialize();
       await voiceService.startListening();
 
-      final emitted = <String>[];
+      final emitted = <VoiceTranscription>[];
       final sub = voiceService.transcriptionStream.listen(emitted.add);
 
       fakeSpeech.emitResult('Hello', finalResult: false);
       fakeSpeech.emitResult('Hello there', finalResult: true);
       await Future<void>.delayed(Duration.zero);
 
-      expect(emitted, equals(['Hello', 'Hello there']));
+      expect(emitted.map((e) => e.text), equals(['Hello', 'Hello there']));
+      expect(emitted.map((e) => e.isFinal), equals([false, true]));
       await sub.cancel();
     });
   });

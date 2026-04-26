@@ -16,19 +16,19 @@ import '../core/errors/exceptions.dart';
 /// - Check microphone permission before starting
 class VoiceService {
   final SpeechToText _speech;
-  final StreamController<String> _transcriptionController;
+  final StreamController<VoiceTranscription> _transcriptionController;
 
   bool _initialized = false;
 
   VoiceService({
     SpeechToText? speechToText,
-    StreamController<String>? transcriptionController,
+    StreamController<VoiceTranscription>? transcriptionController,
   })  : _speech = speechToText ?? SpeechToText(),
         _transcriptionController =
-            transcriptionController ?? StreamController<String>.broadcast();
+            transcriptionController ?? StreamController<VoiceTranscription>.broadcast();
 
   /// Stream of transcription results (partial and final).
-  Stream<String> get transcriptionStream => _transcriptionController.stream;
+  Stream<VoiceTranscription> get transcriptionStream => _transcriptionController.stream;
 
   /// Whether the service is currently listening.
   bool get isListening => _speech.isListening;
@@ -102,7 +102,12 @@ class VoiceService {
   }
 
   void _onResult(SpeechRecognitionResult result) {
-    _transcriptionController.add(result.recognizedWords);
+    _transcriptionController.add(
+      VoiceTranscription(
+        text: result.recognizedWords,
+        isFinal: result.finalResult,
+      ),
+    );
   }
 
   void _onError(SpeechRecognitionError error) {
@@ -115,6 +120,7 @@ class VoiceService {
             code: 'PERMISSION_DENIED',
           ),
         );
+        return;
       case 'error_no_match':
         _transcriptionController.addError(
           const VoiceException(
@@ -122,6 +128,7 @@ class VoiceService {
             code: 'NO_SPEECH',
           ),
         );
+        return;
       case 'error_network':
       case 'error_network_timeout':
         _transcriptionController.addError(
@@ -130,6 +137,7 @@ class VoiceService {
             code: 'NETWORK_ERROR',
           ),
         );
+        return;
       default:
         _transcriptionController.addError(
           VoiceException(
@@ -137,6 +145,7 @@ class VoiceService {
             code: error.errorMsg,
           ),
         );
+        return;
     }
   }
 
@@ -144,4 +153,14 @@ class VoiceService {
     // Status changes are handled via isListening / isAvailable getters.
     // Could emit a status stream in the future if needed.
   }
+}
+
+class VoiceTranscription {
+  final String text;
+  final bool isFinal;
+
+  const VoiceTranscription({
+    required this.text,
+    required this.isFinal,
+  });
 }

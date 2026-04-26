@@ -5,6 +5,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 
 import 'core/di/service_locator.dart';
+import 'core/navigation/app_router.dart';
 import 'core/theme/app_theme.dart';
 import 'domain/repositories/agent_repository.dart';
 import 'presentation/blocs/agents/agents_bloc.dart';
@@ -12,17 +13,13 @@ import 'presentation/blocs/chat/chat_bloc.dart';
 import 'presentation/blocs/connection/connection_bloc.dart' as conn;
 import 'presentation/blocs/sessions/sessions_bloc.dart';
 import 'presentation/blocs/settings/settings_bloc.dart';
-import 'presentation/screens/agent_detail_loader_screen.dart';
-import 'presentation/screens/chat_screen.dart';
-import 'presentation/screens/connect_screen.dart';
-import 'presentation/screens/home_screen.dart';
 
-/// Route names for deep linking.
+/// Backward-compatible route constants.
 abstract class AppRoute {
-  static const connect = '/';
-  static const home = '/home';
-  static const chat = '/chat/:sessionId';
-  static const agent = '/agent/:agentId';
+  static const connect = Routes.connect;
+  static const home = Routes.home;
+  static const chat = Routes.chat;
+  static const agent = Routes.agent;
 }
 
 /// Notifies GoRouter when connection state changes so redirects re-evaluate.
@@ -52,6 +49,7 @@ class _OpenClawAppState extends State<OpenClawApp> {
   late final SessionsBloc _sessionsBloc;
   late final AgentsBloc _agentsBloc;
   late final SettingsBloc _settingsBloc;
+  late final AgentRepository _agentRepository;
   late final _ConnectionRefreshNotifier _refreshNotifier;
   late final GoRouter _router;
 
@@ -63,62 +61,13 @@ class _OpenClawAppState extends State<OpenClawApp> {
     _sessionsBloc = ServiceLocator.get<SessionsBloc>();
     _agentsBloc = ServiceLocator.get<AgentsBloc>();
     _settingsBloc = ServiceLocator.get<SettingsBloc>();
+    _agentRepository = ServiceLocator.get<AgentRepository>();
     _refreshNotifier = _ConnectionRefreshNotifier(_connectionBloc);
-    _router = _createRouter();
-  }
-
-  GoRouter _createRouter() {
-    return GoRouter(
-      initialLocation: AppRoute.connect,
+    _router = AppRouter.create(
+      chatBloc: _chatBloc,
+      connectionBloc: _connectionBloc,
+      agentRepository: _agentRepository,
       refreshListenable: _refreshNotifier,
-      redirect: (context, state) {
-        final connectionState = _connectionBloc.state;
-        final isFullyConnected = connectionState is conn.ConnectionConnected;
-        final hasBeenConnected = _connectionBloc.state is conn.ConnectionConnected ||
-                                   _connectionBloc.state is conn.ConnectionReconnecting ||
-                                   _connectionBloc.state is conn.ConnectionOffline;
-        final isOnConnect = state.matchedLocation == AppRoute.connect;
-
-        // Only redirect to home when first-time connected.
-        if (isFullyConnected && isOnConnect) return AppRoute.home;
-
-        // Only kick to connect screen if we've never connected at all.
-        // If reconnecting or offline, stay where the user is.
-        if (!hasBeenConnected && !isOnConnect) return AppRoute.connect;
-        return null;
-      },
-      routes: [
-        GoRoute(
-          path: AppRoute.connect,
-          builder: (_, __) => const ConnectScreen(),
-        ),
-        GoRoute(
-          path: AppRoute.home,
-          builder: (_, __) => const HomeScreen(),
-        ),
-        GoRoute(
-          path: AppRoute.chat,
-          builder: (_, state) {
-            final sessionId = state.pathParameters['sessionId']!;
-            return BlocProvider.value(
-              value: _chatBloc,
-              child: ChatScreen(sessionId: sessionId),
-            );
-          },
-        ),
-        GoRoute(
-          path: AppRoute.agent,
-          builder: (_, state) {
-            final agentId = state.pathParameters['agentId']!;
-            final repository = ServiceLocator.get<AgentRepository>();
-            return AgentDetailLoaderScreen(
-              agentId: agentId,
-              repository: repository,
-              fallbackRoute: AppRoute.home,
-            );
-          },
-        ),
-      ],
     );
   }
 
