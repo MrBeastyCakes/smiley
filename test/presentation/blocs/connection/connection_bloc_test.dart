@@ -23,6 +23,7 @@ void main() {
     mockClient = MockGatewayWebSocketClient();
     mockPing = MockGatewayPingDataSource();
     when(() => mockClient.statusStream).thenAnswer((_) => const Stream.empty());
+    when(() => mockClient.retryCountStream).thenAnswer((_) => const Stream.empty());
     when(() => mockClient.connect(any())).thenAnswer((_) async {});
     when(() => mockClient.disconnect()).thenAnswer((_) async {});
     when(() => mockClient.isConnected).thenReturn(false);
@@ -78,6 +79,59 @@ void main() {
       build: () => ConnectionBloc(client: mockClient, ping: mockPing),
       act: (bloc) => bloc.add(const DisconnectRequested()),
       expect: () => [isA<ConnectionInitial>()],
+    );
+
+    blocTest<ConnectionBloc, ConnectionState>(
+      'shows reconnecting banner after grace period when disconnected',
+      build: () {
+        when(() => mockClient.statusStream).thenAnswer((_) => const Stream.empty());
+        when(() => mockClient.retryCountStream).thenAnswer((_) => const Stream.empty());
+        when(() => mockClient.isConnected).thenReturn(true);
+        return ConnectionBloc(
+          client: mockClient,
+          ping: mockPing,
+          reconnectingBannerDelay: const Duration(milliseconds: 20),
+        );
+      },
+      act: (bloc) async {
+        const settings = GatewaySettings(host: '127.0.0.1', port: 18789, token: 'test');
+        bloc.add(const ConnectRequested(settings));
+        await Future<void>.delayed(const Duration(milliseconds: 5));
+        bloc.add(const ConnectionStatusChanged(ConnectionStatus.disconnected));
+      },
+      wait: const Duration(milliseconds: 60),
+      expect: () => [
+        isA<ConnectionLoading>(),
+        isA<ConnectionConnected>(),
+        isA<ConnectionReconnecting>(),
+      ],
+    );
+
+    blocTest<ConnectionBloc, ConnectionState>(
+      'does not show reconnecting banner for brief disconnects',
+      build: () {
+        when(() => mockClient.statusStream).thenAnswer((_) => const Stream.empty());
+        when(() => mockClient.retryCountStream).thenAnswer((_) => const Stream.empty());
+        when(() => mockClient.isConnected).thenReturn(true);
+        return ConnectionBloc(
+          client: mockClient,
+          ping: mockPing,
+          reconnectingBannerDelay: const Duration(milliseconds: 40),
+        );
+      },
+      act: (bloc) async {
+        const settings = GatewaySettings(host: '127.0.0.1', port: 18789, token: 'test');
+        bloc.add(const ConnectRequested(settings));
+        await Future<void>.delayed(const Duration(milliseconds: 5));
+        bloc.add(const ConnectionStatusChanged(ConnectionStatus.disconnected));
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+        bloc.add(const ConnectionStatusChanged(ConnectionStatus.connected));
+      },
+      wait: const Duration(milliseconds: 80),
+      expect: () => [
+        isA<ConnectionLoading>(),
+        isA<ConnectionConnected>(),
+      ],
     );
   });
 }
