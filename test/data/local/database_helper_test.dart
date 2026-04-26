@@ -1,6 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:openclaw_client/src/data/local/database_helper.dart';
-import 'package:path/path.dart';
+import 'package:path/path.dart' hide equals;
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 import '../../helpers/sqflite_test_helper.dart';
