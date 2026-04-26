@@ -35,7 +35,7 @@ void main() {
     );
 
     setUp(() async {
-      dbHelper = DatabaseHelper();
+      dbHelper = DatabaseHelper.test('agent_local_test');
       await dbHelper.deleteDatabaseFile();
       dataSource = AgentLocalDataSource(dbHelper: dbHelper);
     });

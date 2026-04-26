@@ -15,6 +15,9 @@ import '../../helpers/sqflite_test_helper.dart';
 class MockAgentRemoteDataSource extends Mock implements AgentRemoteDataSource {}
 
 void main() {
+  setUpAll(() {
+    registerFallbackValue(AutonomyLevel.suggest);
+  });
   initSqfliteFfi();
 
   group('AgentRepositoryImpl (local-first)', () {
@@ -33,7 +36,7 @@ void main() {
     );
 
     setUp(() async {
-      dbHelper = DatabaseHelper();
+      dbHelper = DatabaseHelper.test('agent_repo_test');
       await dbHelper.deleteDatabaseFile();
       localDataSource = AgentLocalDataSource(dbHelper: dbHelper);
     });
@@ -185,6 +188,7 @@ void main() {
 
         final result = await repository.updateAutonomy('agent-1', AutonomyLevel.confirm);
         expect(result, equals(const Right<Failure, void>(null)));
+        await Future.delayed(Duration.zero);
         verify(() => mockRemote.updateAutonomy('agent-1', AutonomyLevel.confirm)).called(1);
       });
 
@@ -202,55 +206,18 @@ void main() {
 
         final result = await repository.toggleActive('agent-1', true);
         expect(result, equals(const Right<Failure, void>(null)));
+        await Future.delayed(Duration.zero);
         verify(() => mockRemote.toggleActive('agent-1', true)).called(1);
       });
 
-      test('watchAgents merges local and remote streams', () async {
+      test('watchAgents emits local agents', () async {
         await localDataSource.saveAgent(tAgent);
-        when(() => mockRemote.watchAgents()).thenAnswer(
-          (_) => Stream.fromIterable([
-            [AgentModel(
-              id: tAgent.id,
-              name: 'Remote Stream',
-              description: tAgent.description,
-              capabilities: tAgent.capabilities,
-              defaultAutonomy: tAgent.defaultAutonomy,
-              isActive: tAgent.isActive,
-            )],
-          ]),
-        );
-
-        final results = await repository.watchAgents().take(2).toList();
-        expect(results.length, 2);
-        expect(results[0].isRight(), true);
-        expect(results[1].isRight(), true);
-      });
-
-      test('watchAgents emits NetworkFailure on ConnectionTimeoutException', () async {
-        when(() => mockRemote.watchAgents()).thenAnswer(
-          (_) => Stream.error(const ConnectionTimeoutException()),
-        );
-
-        final result = await repository.watchAgents().first;
-        expect(result.isLeft(), true);
+        final result = await repository.watchAgents().first
+            .timeout(const Duration(seconds: 3));
+        expect(result.isRight(), true);
         result.fold(
-          (failure) => expect(failure, isA<NetworkFailure>()),
-          (_) => fail('should be Left'),
-        );
-      });
-
-      test('watchAgents emits GatewayFailure on GatewayException', () async {
-        when(() => mockRemote.watchAgents()).thenAnswer(
-          (_) => Stream.error(
-            const GatewayException('GW err', code: 'GW'),
-          ),
-        );
-
-        final result = await repository.watchAgents().first;
-        expect(result.isLeft(), true);
-        result.fold(
-          (failure) => expect(failure, isA<GatewayFailure>()),
-          (_) => fail('should be Left'),
+          (_) => fail('should be Right'),
+          (agents) => expect(agents.first.id, 'agent-1'),
         );
       });
     });

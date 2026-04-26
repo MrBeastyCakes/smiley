@@ -1,6 +1,5 @@
 import 'dart:async';
 
-import '../../core/errors/exceptions.dart';
 import '../../domain/entities/agent.dart';
 import '../../services/gateway_websocket.dart';
 import '../models/agent_model.dart';
@@ -25,89 +24,45 @@ abstract class AgentRemoteDataSource {
 
 class AgentRemoteDataSourceImpl implements AgentRemoteDataSource {
   final GatewayWebSocketClient client;
-  final Duration responseTimeout;
 
-  const AgentRemoteDataSourceImpl({
-    required this.client,
-    this.responseTimeout = const Duration(seconds: 5),
-  });
-
-  Future<Map<String, dynamic>> _awaitResponse(String expectedType) async {
-    final completer = Completer<Map<String, dynamic>>();
-    late StreamSubscription<Map<String, dynamic>> sub;
-
-    sub = client.messageStream.listen((msg) {
-      if (msg['type'] == expectedType && !completer.isCompleted) {
-        completer.complete(msg);
-      }
-    });
-
-    final timer = Timer(responseTimeout, () {
-      if (!completer.isCompleted) {
-        completer.completeError(const ConnectionTimeoutException());
-      }
-    });
-
-    try {
-      return await completer.future;
-    } finally {
-      timer.cancel();
-      await sub.cancel();
-    }
-  }
+  const AgentRemoteDataSourceImpl({required this.client});
 
   @override
   Future<List<AgentModel>> getAgents() async {
-    final future = _awaitResponse('agents_list');
-    await client.send({'type': 'list_agents'});
-    final response = await future;
-
+    final response = await client.sendRequest({'type': 'list_agents'});
     final data = response['agents'] ?? response['data'];
-    if (data is! List<dynamic>) {
-      throw const GatewayException('Invalid agents list response', code: 'INVALID_RESPONSE');
-    }
+    if (data is! List<dynamic>) return [];
     return data.map((json) => AgentModel.fromJson(json as Map<String, dynamic>)).toList();
   }
 
   @override
   Future<AgentModel> getAgentById(String id) async {
-    final future = _awaitResponse('agent');
-    await client.send({'type': 'get_agent', 'id': id});
-    final response = await future;
-
+    final response = await client.sendRequest({'type': 'get_agent', 'id': id});
     final data = response['agent'] ?? response;
     if (data is! Map<String, dynamic>) {
-      throw const GatewayException('Invalid agent response', code: 'INVALID_RESPONSE');
+      throw const FormatException('Invalid agent response');
     }
     return AgentModel.fromJson(data);
   }
 
   @override
   Future<void> updateAutonomy(String id, AutonomyLevel level) async {
-    await client.send({
-      'type': 'update_autonomy',
-      'id': id,
-      'level': level.name,
-    });
+    await client.sendRequest({'type': 'update_autonomy', 'id': id, 'level': level.name});
   }
 
   @override
   Future<void> toggleActive(String id, bool active) async {
-    await client.send({
-      'type': 'toggle_active',
-      'id': id,
-      'active': active,
-    });
+    await client.sendRequest({'type': 'toggle_active', 'id': id, 'active': active});
   }
 
   @override
   Stream<List<AgentModel>> watchAgents() {
-    return client.messageStream
+    return client.eventStream
         .where((msg) => msg['type'] == 'agent_update')
         .map((msg) {
-          final data = msg['agents'] ?? msg['data'];
-          if (data is! List<dynamic>) return <AgentModel>[];
-          return data.map((json) => AgentModel.fromJson(json as Map<String, dynamic>)).toList();
-        });
+      final data = msg['agents'] ?? msg['data'];
+      if (data is! List<dynamic>) return <AgentModel>[];
+      return data.map((json) => AgentModel.fromJson(json as Map<String, dynamic>)).toList();
+    });
   }
 }

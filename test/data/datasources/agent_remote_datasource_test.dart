@@ -1,4 +1,4 @@
-﻿import 'dart:async';
+import 'dart:async';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
@@ -14,227 +14,126 @@ void main() {
   late MockGatewayWebSocketClient mockClient;
   late AgentRemoteDataSource dataSource;
 
+  setUpAll(() {
+    registerFallbackValue(AutonomyLevel.suggest);
+  });
+
   setUp(() {
     mockClient = MockGatewayWebSocketClient();
-    dataSource = AgentRemoteDataSourceImpl(
-      client: mockClient,
-      responseTimeout: const Duration(milliseconds: 50),
-    );
+    dataSource = AgentRemoteDataSourceImpl(client: mockClient);
   });
 
   group('getAgents', () {
-    test('should send list_agents and return decoded agents', () async {
-      final controller = StreamController<Map<String, dynamic>>.broadcast();
-      when(() => mockClient.messageStream).thenAnswer((_) => controller.stream);
-      when(() => mockClient.send(any())).thenAnswer((_) async {});
-
-      final future = dataSource.getAgents();
-      await Future.delayed(Duration.zero);
-
-      controller.add({
-        'type': 'agents_list',
+    test('should call sendRequest and return decoded agents', () async {
+      when(() => mockClient.sendRequest(any())).thenAnswer((_) async => {
         'agents': [
           {'id': '1', 'name': 'Agent 1', 'defaultAutonomy': 'suggest', 'isActive': true},
           {'id': '2', 'name': 'Agent 2', 'defaultAutonomy': 'autonomous', 'isActive': false},
         ],
       });
 
-      final result = await future;
+      final result = await dataSource.getAgents();
+
       expect(result.length, 2);
       expect(result[0].id, '1');
       expect(result[0].name, 'Agent 1');
       expect(result[1].id, '2');
       expect(result[1].name, 'Agent 2');
 
-      verify(() => mockClient.send({'type': 'list_agents'})).called(1);
-      await controller.close();
+      verify(() => mockClient.sendRequest({'type': 'list_agents'})).called(1);
     });
 
-    test('should throw ConnectionTimeoutException when response times out', () async {
-      final controller = StreamController<Map<String, dynamic>>.broadcast();
-      when(() => mockClient.messageStream).thenAnswer((_) => controller.stream);
-      when(() => mockClient.send(any())).thenAnswer((_) async {});
+    test('should return empty list on null data', () async {
+      when(() => mockClient.sendRequest(any())).thenAnswer((_) async => {});
 
-      expect(
-        () => dataSource.getAgents(),
-        throwsA(isA<ConnectionTimeoutException>()),
-      );
-
-      await controller.close();
-    });
-
-    test('should throw GatewayException on invalid response data', () async {
-      final controller = StreamController<Map<String, dynamic>>.broadcast();
-      when(() => mockClient.messageStream).thenAnswer((_) => controller.stream);
-      when(() => mockClient.send(any())).thenAnswer((_) async {});
-
-      final future = dataSource.getAgents();
-      await Future.delayed(Duration.zero);
-
-      controller.add({
-        'type': 'agents_list',
-        'agents': 'not a list',
-      });
-
-      expect(
-        () => future,
-        throwsA(isA<GatewayException>()),
-      );
-
-      await controller.close();
+      final result = await dataSource.getAgents();
+      expect(result, isEmpty);
     });
   });
 
   group('getAgentById', () {
-    test('should send get_agent and return decoded agent', () async {
-      final controller = StreamController<Map<String, dynamic>>.broadcast();
-      when(() => mockClient.messageStream).thenAnswer((_) => controller.stream);
-      when(() => mockClient.send(any())).thenAnswer((_) async {});
-
-      const tId = 'agent-1';
-      final future = dataSource.getAgentById(tId);
-      await Future.delayed(Duration.zero);
-
-      controller.add({
-        'type': 'agent',
-        'agent': {'id': tId, 'name': 'Test Agent', 'defaultAutonomy': 'confirm', 'isActive': true},
+    test('should call sendRequest and return decoded agent', () async {
+      when(() => mockClient.sendRequest(any())).thenAnswer((_) async => {
+        'agent': {'id': 'agent-1', 'name': 'Test Agent', 'defaultAutonomy': 'confirm', 'isActive': true},
       });
 
-      final result = await future;
-      expect(result.id, tId);
-      expect(result.name, 'Test Agent');
-      expect(result.defaultAutonomy, 'confirm');
-      expect(result.isActive, true);
+      final result = await dataSource.getAgentById('agent-1');
 
-      verify(() => mockClient.send({'type': 'get_agent', 'id': tId})).called(1);
-      await controller.close();
+      expect(result.id, 'agent-1');
+      expect(result.name, 'Test Agent');
+      verify(() => mockClient.sendRequest({'type': 'get_agent', 'id': 'agent-1'})).called(1);
     });
 
-    test('should parse inline agent when no agent wrapper key', () async {
-      final controller = StreamController<Map<String, dynamic>>.broadcast();
-      when(() => mockClient.messageStream).thenAnswer((_) => controller.stream);
-      when(() => mockClient.send(any())).thenAnswer((_) async {});
-
-      const tId = 'agent-1';
-      final future = dataSource.getAgentById(tId);
-      await Future.delayed(Duration.zero);
-
-      controller.add({
-        'type': 'agent',
-        'id': tId,
+    test('should parse inline agent when no wrapper key', () async {
+      when(() => mockClient.sendRequest(any())).thenAnswer((_) async => {
+        'id': 'agent-1',
         'name': 'Inline Agent',
         'defaultAutonomy': 'observe',
         'isActive': false,
       });
 
-      final result = await future;
-      expect(result.id, tId);
+      final result = await dataSource.getAgentById('agent-1');
+
+      expect(result.id, 'agent-1');
       expect(result.name, 'Inline Agent');
-
-      await controller.close();
     });
 
-    test('should throw ConnectionTimeoutException when response times out', () async {
-      final controller = StreamController<Map<String, dynamic>>.broadcast();
-      when(() => mockClient.messageStream).thenAnswer((_) => controller.stream);
-      when(() => mockClient.send(any())).thenAnswer((_) async {});
-
-      expect(
-        () => dataSource.getAgentById('any-id'),
-        throwsA(isA<ConnectionTimeoutException>()),
-      );
-
-      await controller.close();
-    });
-
-    test('should throw GatewayException on invalid response data', () async {
-      final controller = StreamController<Map<String, dynamic>>.broadcast();
-      when(() => mockClient.messageStream).thenAnswer((_) => controller.stream);
-      when(() => mockClient.send(any())).thenAnswer((_) async {});
-
-      final future = dataSource.getAgentById('any-id');
-      await Future.delayed(Duration.zero);
-
-      controller.add({
-        'type': 'agent',
+    test('should throw FormatException on invalid response data', () async {
+      when(() => mockClient.sendRequest(any())).thenAnswer((_) async => {
         'agent': 'not a map',
       });
 
       expect(
-        () => future,
-        throwsA(isA<GatewayException>()),
+        () => dataSource.getAgentById('any-id'),
+        throwsA(isA<FormatException>()),
       );
-
-      await controller.close();
     });
   });
 
   group('updateAutonomy', () {
-    test('should send update_autonomy with correct payload', () async {
-      when(() => mockClient.send(any())).thenAnswer((_) async {});
+    test('should call sendRequest with correct payload', () async {
+      when(() => mockClient.sendRequest(any())).thenAnswer((_) async => {});
 
       await dataSource.updateAutonomy('agent-1', AutonomyLevel.autonomous);
 
-      verify(() => mockClient.send({
+      verify(() => mockClient.sendRequest({
         'type': 'update_autonomy',
         'id': 'agent-1',
         'level': 'autonomous',
       })).called(1);
     });
-
-    test('should propagate GatewayException on send failure', () async {
-      when(() => mockClient.send(any())).thenThrow(
-        const GatewayException('Send failed: socket closed', code: 'SEND_ERROR'),
-      );
-
-      expect(
-        () => dataSource.updateAutonomy('agent-1', AutonomyLevel.confirm),
-        throwsA(isA<GatewayException>()),
-      );
-    });
   });
 
   group('toggleActive', () {
-    test('should send toggle_active with correct payload', () async {
-      when(() => mockClient.send(any())).thenAnswer((_) async {});
+    test('should call sendRequest with correct payload', () async {
+      when(() => mockClient.sendRequest(any())).thenAnswer((_) async => {});
 
       await dataSource.toggleActive('agent-1', true);
 
-      verify(() => mockClient.send({
+      verify(() => mockClient.sendRequest({
         'type': 'toggle_active',
         'id': 'agent-1',
         'active': true,
       })).called(1);
     });
 
-    test('should send toggle_active with active false', () async {
-      when(() => mockClient.send(any())).thenAnswer((_) async {});
+    test('should call sendRequest with active false', () async {
+      when(() => mockClient.sendRequest(any())).thenAnswer((_) async => {});
 
       await dataSource.toggleActive('agent-1', false);
 
-      verify(() => mockClient.send({
+      verify(() => mockClient.sendRequest({
         'type': 'toggle_active',
         'id': 'agent-1',
         'active': false,
       })).called(1);
-    });
-
-    test('should propagate GatewayException on send failure', () async {
-      when(() => mockClient.send(any())).thenThrow(
-        const GatewayException('Send failed: socket closed', code: 'SEND_ERROR'),
-      );
-
-      expect(
-        () => dataSource.toggleActive('agent-1', true),
-        throwsA(isA<GatewayException>()),
-      );
     });
   });
 
   group('watchAgents', () {
     test('should emit decoded agents on agent_update events', () async {
       final controller = StreamController<Map<String, dynamic>>.broadcast();
-      when(() => mockClient.messageStream).thenAnswer((_) => controller.stream);
+      when(() => mockClient.eventStream).thenAnswer((_) => controller.stream);
 
       final stream = dataSource.watchAgents();
       final emissions = <List<AgentModel>>[];
@@ -258,7 +157,7 @@ void main() {
 
     test('should ignore non-agent_update messages', () async {
       final controller = StreamController<Map<String, dynamic>>.broadcast();
-      when(() => mockClient.messageStream).thenAnswer((_) => controller.stream);
+      when(() => mockClient.eventStream).thenAnswer((_) => controller.stream);
 
       final stream = dataSource.watchAgents();
       final emissions = <List<AgentModel>>[];
@@ -276,7 +175,7 @@ void main() {
 
     test('should emit empty list when update payload is invalid', () async {
       final controller = StreamController<Map<String, dynamic>>.broadcast();
-      when(() => mockClient.messageStream).thenAnswer((_) => controller.stream);
+      when(() => mockClient.eventStream).thenAnswer((_) => controller.stream);
 
       final stream = dataSource.watchAgents();
       final emissions = <List<AgentModel>>[];

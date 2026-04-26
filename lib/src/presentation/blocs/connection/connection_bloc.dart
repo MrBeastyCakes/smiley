@@ -7,6 +7,7 @@ import 'package:equatable/equatable.dart';
 import '../../../core/di/service_locator.dart';
 import '../../../core/errors/exceptions.dart';
 import '../../../data/datasources/gateway_ping_datasource.dart';
+import '../../../data/sync/sync_coordinator.dart';
 import '../../../domain/entities/gateway_settings.dart';
 import '../../../services/gateway_websocket.dart';
 
@@ -16,12 +17,17 @@ part 'connection_state.dart';
 class ConnectionBloc extends Bloc<ConnectionEvent, ConnectionState> {
   final GatewayWebSocketClient? _client;
   final GatewayPingDataSource? _ping;
+  final SyncCoordinator? _syncCoordinator;
   StreamSubscription? _statusSubscription;
   GatewaySettings? _lastSettings;
 
-  ConnectionBloc({GatewayWebSocketClient? client, GatewayPingDataSource? ping})
-      : _client = client ?? ServiceLocator.get<GatewayWebSocketClient>(),
+  ConnectionBloc({
+    GatewayWebSocketClient? client,
+    GatewayPingDataSource? ping,
+    SyncCoordinator? syncCoordinator,
+  })  : _client = client ?? ServiceLocator.get<GatewayWebSocketClient>(),
         _ping = ping,
+        _syncCoordinator = syncCoordinator,
         super(const ConnectionInitial()) {
     on<ConnectRequested>(_onConnectRequested);
     on<DisconnectRequested>(_onDisconnectRequested);
@@ -56,6 +62,8 @@ class ConnectionBloc extends Bloc<ConnectionEvent, ConnectionState> {
       // fired before we subscribed to the status stream).
       if (_client!.isConnected) {
         emit(ConnectionConnected(settings: event.settings));
+        // Start background sync
+        await _syncCoordinator?.startSync(event.settings);
       }
     } on SocketException catch (e) {
       final code = _mapSocketError(e);
@@ -79,6 +87,7 @@ class ConnectionBloc extends Bloc<ConnectionEvent, ConnectionState> {
   Future<void> _onDisconnectRequested(DisconnectRequested event, Emitter<ConnectionState> emit) async {
     await _statusSubscription?.cancel();
     _statusSubscription = null;
+    await _syncCoordinator?.stopSync();
     await _client?.disconnect();
     emit(const ConnectionInitial());
   }
@@ -89,8 +98,13 @@ class ConnectionBloc extends Bloc<ConnectionEvent, ConnectionState> {
         if (state is ConnectionLoading || state is ConnectionError) {
           emit(ConnectionConnected(settings: _lastSettings ?? const GatewaySettings(host: '', port: 0, token: '')));
         }
+        // Start background sync when fully connected
+        if (_lastSettings != null) {
+          await _syncCoordinator?.startSync(_lastSettings!);
+        }
         break;
       case ConnectionStatus.disconnected:
+        await _syncCoordinator?.stopSync();
         emit(const ConnectionInitial());
         break;
       case ConnectionStatus.error:

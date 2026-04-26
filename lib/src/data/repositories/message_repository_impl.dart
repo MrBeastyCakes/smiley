@@ -85,43 +85,29 @@ class MessageRepositoryImpl implements MessageRepository {
 
   @override
   Stream<Either<Failure, ChatMessage>> watchNewMessages(String sessionId) {
-    final localStream = localDataSource.watchNewMessages(sessionId).map(
+    // Local stream is authoritative; remote sync happens in background.
+    return localDataSource.watchNewMessages(sessionId).map(
           (model) => Right<Failure, ChatMessage>(model.toEntity()),
         );
-
-    if (!_hasRemote) return localStream;
-
-    final remoteStream = remoteDataSource!.watchNewMessages(sessionId).asyncMap(
-      (model) async {
-        await localDataSource.saveMessage(model);
-        return Right<Failure, ChatMessage>(model.toEntity());
-      },
-    ).handleError(
-      (Object error) => Left<Failure, ChatMessage>(
-        error is GatewayException
-            ? GatewayFailure(error.message, code: error.code)
-            : NetworkFailure('Message stream error: $error'),
-      ),
-    );
-
-    return StreamGroup.merge([localStream, remoteStream]);
   }
 
   @override
   Stream<Either<Failure, String>> watchMessageStream(String sessionId) {
     if (!_hasRemote) return const Stream.empty();
 
-    return remoteDataSource!.watchMessageEvents().where(
-          (json) =>
-              json['type'] == 'message_chunk' && json['sessionId'] == sessionId,
-        ).map(
-          (json) => Right<Failure, String>(json['chunk'] as String? ?? ''),
-        ).handleError(
-      (Object error) => Left<Failure, String>(
-        error is GatewayException
-            ? GatewayFailure(error.message, code: error.code)
-            : NetworkFailure('Message stream error: $error'),
-      ),
-    );
+    return remoteDataSource!.watchMessageEvents()
+        .where((json) => json['type'] == 'message_chunk' && json['sessionId'] == sessionId)
+        .map((json) => Right<Failure, String>(json['chunk'] as String? ?? ''))
+        .transform(StreamTransformer.fromHandlers(
+          handleError: (error, stackTrace, sink) {
+            sink.add(
+              Left<Failure, String>(
+                error is GatewayException
+                    ? GatewayFailure(error.message, code: error.code)
+                    : NetworkFailure('Message stream error: $error'),
+              ),
+            );
+          },
+        ));
   }
 }

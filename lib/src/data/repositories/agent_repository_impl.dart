@@ -88,7 +88,8 @@ class AgentRepositoryImpl implements AgentRepository {
 
       if (_hasRemote) {
         unawaited(
-          remoteDataSource!.updateAutonomy(id, level).catchError((_) {}),
+          Future(() => remoteDataSource!.updateAutonomy(id, level))
+              .catchError((_) {}),
         );
       }
 
@@ -107,7 +108,8 @@ class AgentRepositoryImpl implements AgentRepository {
 
       if (_hasRemote) {
         unawaited(
-          remoteDataSource!.toggleActive(id, active).catchError((_) {}),
+          Future(() => remoteDataSource!.toggleActive(id, active))
+              .catchError((_) {}),
         );
       }
 
@@ -121,27 +123,9 @@ class AgentRepositoryImpl implements AgentRepository {
 
   @override
   Stream<Either<Failure, List<Agent>>> watchAgents() {
-    final localStream = localDataSource.watchAgents().map(
-          (models) => Right<Failure, List<Agent>>(_modelsToEntities(models)),
-        );
-
-    if (!_hasRemote) return localStream;
-
-    final remoteStream = remoteDataSource!.watchAgents().asyncMap(
-      (models) async {
-        await localDataSource.saveAgents(models);
-        return Right<Failure, List<Agent>>(_modelsToEntities(models));
-      },
-    ).handleError(
-      (Object error) => Left<Failure, List<Agent>>(
-        error is GatewayException
-            ? GatewayFailure(error.message, code: error.code)
-            : error is ConnectionTimeoutException
-                ? NetworkFailure(error.message, code: error.code)
-                : NetworkFailure('Agent stream error: $error'),
-      ),
+    // Local stream is authoritative; remote sync happens in background.
+    return localDataSource.watchAgents().map(
+      (models) => Right<Failure, List<Agent>>(_modelsToEntities(models)),
     );
-
-    return StreamGroup.merge([localStream, remoteStream]);
   }
 }

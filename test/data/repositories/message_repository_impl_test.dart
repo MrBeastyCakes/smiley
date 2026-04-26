@@ -33,7 +33,7 @@ void main() {
     );
 
     setUp(() async {
-      dbHelper = DatabaseHelper();
+      dbHelper = DatabaseHelper.test('message_repo_test');
       await dbHelper.deleteDatabaseFile();
       localDataSource = MessageLocalDataSource(dbHelper: dbHelper);
     });

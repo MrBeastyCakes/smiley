@@ -41,7 +41,7 @@ void main() {
     );
 
     setUp(() async {
-      dbHelper = DatabaseHelper();
+      dbHelper = DatabaseHelper.test('message_local_test');
       await dbHelper.deleteDatabaseFile();
       dataSource = MessageLocalDataSource(dbHelper: dbHelper);
     });

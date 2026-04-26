@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:sqflite/sqflite.dart';
 
 import '../../core/errors/exceptions.dart';
@@ -130,7 +132,7 @@ class SessionLocalDataSource implements SessionRemoteDataSource {
 
   @override
   Stream<List<SessionModel>> watchSessions() {
-    // SQLite on Flutter doesn't have built-in notify; we poll every 2s.
+    // SQLite on Flutter doesn't have built-in notify; poll every 2s.
     return Stream.periodic(const Duration(seconds: 2))
         .asyncMap((_) => listSessions());
   }

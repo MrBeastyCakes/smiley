@@ -30,102 +30,61 @@ void main() {
   setUp(() {
     mockClient = MockGatewayWebSocketClient();
     dataSource = MessageRemoteDataSourceImpl(client: mockClient);
-
-    when(() => mockClient.send(any())).thenAnswer((_) async {});
   });
 
   group('listMessages', () {
-    test('should send correct JSON and decode response', () async {
-      final controller = StreamController<Map<String, dynamic>>.broadcast();
-      when(() => mockClient.messageStream).thenAnswer((_) => controller.stream);
-
-      final future = dataSource.listMessages(tSessionId);
-
-      await Future.delayed(Duration.zero);
-
-      verify(() => mockClient.send({
-            'type': 'list_messages',
-            'sessionId': tSessionId,
-          })).called(1);
-
-      controller.add({
-        'type': 'message_list',
-        'sessionId': tSessionId,
+    test('should call sendRequest and decode response', () async {
+      when(() => mockClient.sendRequest(any())).thenAnswer((_) async => {
         'messages': [tMessageJson],
       });
 
-      final result = await future;
+      final result = await dataSource.listMessages(tSessionId);
 
       expect(result.length, 1);
       expect(result.first.id, tMessageModel.id);
       expect(result.first.text, tMessageModel.text);
 
-      await controller.close();
+      verify(() => mockClient.sendRequest({
+        'type': 'list_messages',
+        'sessionId': tSessionId,
+      })).called(1);
     });
 
-    test('should throw GatewayException on error', () async {
-      final controller = StreamController<Map<String, dynamic>>.broadcast();
-      when(() => mockClient.messageStream).thenAnswer((_) => controller.stream);
+    test('should throw GatewayException when sendRequest fails', () async {
+      when(() => mockClient.sendRequest(any())).thenThrow(
+        const GatewayException('Not connected', code: 'NOT_CONNECTED'),
+      );
 
-      final future = dataSource.listMessages(tSessionId);
-
-      await Future.delayed(Duration.zero);
-      controller.addError(Exception('network error'));
-
-      expect(future, throwsA(isA<GatewayException>()));
-
-      await controller.close();
+      expect(
+        () => dataSource.listMessages(tSessionId),
+        throwsA(isA<GatewayException>()),
+      );
     });
   });
 
   group('sendMessage', () {
-    test('should send correct JSON and decode response', () async {
-      final controller = StreamController<Map<String, dynamic>>.broadcast();
-      when(() => mockClient.messageStream).thenAnswer((_) => controller.stream);
-
-      final future = dataSource.sendMessage(tSessionId, 'Hi there');
-
-      await Future.delayed(Duration.zero);
-
-      verify(() => mockClient.send({
-            'type': 'send_message',
-            'sessionId': tSessionId,
-            'text': 'Hi there',
-          })).called(1);
-
-      controller.add({
-        'type': 'message_sent',
-        'sessionId': tSessionId,
+    test('should call sendRequest and decode response', () async {
+      when(() => mockClient.sendRequest(any())).thenAnswer((_) async => {
         'message': tMessageJson,
       });
 
-      final result = await future;
+      final result = await dataSource.sendMessage(tSessionId, 'Hi there');
 
       expect(result.id, tMessageModel.id);
       expect(result.text, tMessageModel.text);
 
-      await controller.close();
-    });
-
-    test('should throw GatewayException on error', () async {
-      final controller = StreamController<Map<String, dynamic>>.broadcast();
-      when(() => mockClient.messageStream).thenAnswer((_) => controller.stream);
-
-      final future = dataSource.sendMessage(tSessionId, 'Hi');
-
-      await Future.delayed(Duration.zero);
-      controller.addError(Exception('network error'));
-
-      expect(future, throwsA(isA<GatewayException>()));
-
-      await controller.close();
+      verify(() => mockClient.sendRequest({
+        'type': 'send_message',
+        'sessionId': tSessionId,
+        'text': 'Hi there',
+      })).called(1);
     });
   });
 
   group('watchNewMessages', () {
     test('should filter by sessionId and emit complete messages', () async {
       final controller = StreamController<Map<String, dynamic>>.broadcast();
-      when(() => mockClient.messageStream).thenAnswer((_) => controller.stream);
+      when(() => mockClient.eventStream).thenAnswer((_) => controller.stream);
 
       final messages = <ChatMessageModel>[];
       final sub = dataSource.watchNewMessages(tSessionId).listen(messages.add);
@@ -159,10 +118,10 @@ void main() {
     });
   });
 
-  group('watchMessageEvents (via watchMessageStream delegation)', () {
-    test('watchMessageEvents should emit raw events including chunks', () async {
+  group('watchMessageEvents', () {
+    test('should emit raw events including chunks', () async {
       final controller = StreamController<Map<String, dynamic>>.broadcast();
-      when(() => mockClient.messageStream).thenAnswer((_) => controller.stream);
+      when(() => mockClient.eventStream).thenAnswer((_) => controller.stream);
 
       final events = <Map<String, dynamic>>[];
       final sub = dataSource.watchMessageEvents().listen(events.add);

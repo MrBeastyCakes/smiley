@@ -84,7 +84,7 @@ void main() {
         return AgentsBloc(
           repository: _MockAgentRepository(
             agents: mockAgents,
-            watchStream: Stream.value(updated),
+            watchStream: Stream.fromFuture(Future.delayed(Duration.zero, () => updated)),
           ),
         );
       },

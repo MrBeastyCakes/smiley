@@ -143,29 +143,9 @@ class SessionRepositoryImpl implements SessionRepository {
 
   @override
   Stream<Either<Failure, List<Session>>> watchSessions() {
-    final localStream = localDataSource.watchSessions().map(
-          (models) => Right<Failure, List<Session>>(_modelsToEntities(models)),
-        );
-
-    if (!_hasRemote) return localStream;
-
-    // Merge local polling stream with remote push stream.
-    final remoteStream = remoteDataSource!.watchSessions().transform(
-      StreamTransformer<List<SessionModel>, Either<Failure, List<Session>>>.fromHandlers(
-        handleData: (models, sink) async {
-          await localDataSource.saveSessions(models);
-          sink.add(Right<Failure, List<Session>>(_modelsToEntities(models)));
-        },
-        handleError: (Object error, StackTrace stackTrace, EventSink<Either<Failure, List<Session>>> sink) {
-          if (error is GatewayException) {
-            sink.add(Left(GatewayFailure(error.message, code: error.code)));
-          } else {
-            sink.add(Left(NetworkFailure('Session stream error: $error')));
-          }
-        },
-      ),
+    // Local stream is authoritative; remote sync happens in background.
+    return localDataSource.watchSessions().map(
+      (models) => Right<Failure, List<Session>>(_modelsToEntities(models)),
     );
-
-    return StreamGroup.merge([localStream, remoteStream]);
   }
 }

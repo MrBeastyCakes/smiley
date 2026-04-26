@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
+import 'dart:typed_data';
 
 import 'package:web_socket_channel/web_socket_channel.dart';
 
@@ -27,11 +28,16 @@ class GatewayWebSocketClient {
       StreamController<ConnectionStatus>.broadcast();
   final StreamController<Map<String, dynamic>> _messageController =
       StreamController<Map<String, dynamic>>.broadcast();
+  final StreamController<Map<String, dynamic>> _requestController =
+      StreamController<Map<String, dynamic>>.broadcast();
 
   WebSocketChannel? _channel;
   Timer? _heartbeatTimer;
   Timer? _heartbeatTimeoutTimer;
   Timer? _reconnectTimer;
+
+  final Map<String, Completer<Map<String, dynamic>>> _pendingRequests = {};
+  final _random = Random.secure();
 
   ConnectionStatus _status = ConnectionStatus.disconnected;
   GatewaySettings? _settings;
@@ -47,6 +53,9 @@ class GatewayWebSocketClient {
 
   /// Stream of incoming JSON messages from the gateway.
   Stream<Map<String, dynamic>> get messageStream => _messageController.stream;
+
+  /// Stream of incoming broadcast events (non-request-responses).
+  Stream<Map<String, dynamic>> get eventStream => _messageController.stream;
 
   /// Stream of connection status changes.
   Stream<ConnectionStatus> get statusStream => _statusController.stream;
@@ -120,6 +129,50 @@ class GatewayWebSocketClient {
     _startHeartbeat();
   }
 
+  /// Generates a unique request ID for correlated request/response.
+  String _generateReqId() {
+    final bytes = Uint8List(12);
+    for (var i = 0; i < 12; i++) bytes[i] = _random.nextInt(256);
+    return base64Url.encode(bytes);
+  }
+
+  /// Sends a request and waits for the matching response by `req_id`.
+  /// Returns the response payload (with `req_id` stripped).
+  Future<Map<String, dynamic>> sendRequest(Map<String, dynamic> payload) async {
+    if (!isConnected || _channel == null) {
+      throw const GatewayException('Not connected', code: 'NOT_CONNECTED');
+    }
+
+    final reqId = _generateReqId();
+    final completer = Completer<Map<String, dynamic>>();
+    _pendingRequests[reqId] = completer;
+
+    final message = Map<String, dynamic>.from(payload)..['req_id'] = reqId;
+
+    try {
+      _channel!.sink.add(jsonEncode(message));
+    } catch (e) {
+      _pendingRequests.remove(reqId);
+      throw GatewayException('Send failed: $e', code: 'SEND_ERROR');
+    }
+
+    try {
+      final response = await completer.future.timeout(
+        const Duration(seconds: 10),
+        onTimeout: () {
+          _pendingRequests.remove(reqId);
+          throw const GatewayException('Request timeout', code: 'TIMEOUT');
+        },
+      );
+      return response;
+    } on GatewayException {
+      rethrow;
+    } catch (e) {
+      _pendingRequests.remove(reqId);
+      throw GatewayException('Request failed: $e', code: 'REQUEST_FAILED');
+    }
+  }
+
   void _onMessage(dynamic data) {
     if (_disposed) return;
 
@@ -139,6 +192,16 @@ class GatewayWebSocketClient {
       _pendingPing = false;
       _heartbeatTimeoutTimer?.cancel();
       _heartbeatTimeoutTimer = null;
+      return;
+    }
+
+    // Route correlated responses to pending requests
+    final reqId = json['req_id'] as String?;
+    if (reqId != null && _pendingRequests.containsKey(reqId)) {
+      final completer = _pendingRequests.remove(reqId)!;
+      if (!completer.isCompleted) {
+        completer.complete(Map<String, dynamic>.from(json)..remove('req_id'));
+      }
       return;
     }
 
@@ -224,6 +287,15 @@ class GatewayWebSocketClient {
 
   /// Disconnects from the gateway and stops reconnection attempts.
   Future<void> disconnect() async {
+    for (final completer in _pendingRequests.values) {
+      if (!completer.isCompleted) {
+        completer.completeError(
+          const GatewayException('Client disconnected', code: 'DISCONNECTED'),
+        );
+      }
+    }
+    _pendingRequests.clear();
+
     if (_disposed) return;
     _settings = null;
     _reconnectDelay = _initialReconnectDelay;

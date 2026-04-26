@@ -11,6 +11,7 @@ import '../../data/repositories/agent_repository_impl.dart';
 import '../../data/repositories/message_repository_impl.dart';
 import '../../data/repositories/session_repository_impl.dart';
 import '../../data/repositories/settings_repository_impl.dart';
+import '../../data/sync/sync_coordinator.dart';
 import '../../domain/repositories/agent_repository.dart';
 import '../../domain/repositories/message_repository.dart';
 import '../../domain/repositories/session_repository.dart';
@@ -63,13 +64,24 @@ class ServiceLocator {
     // ── Services ──────────────────────────────────
     final notificationService = NotificationService();
 
+    // ── Sync coordinator ──────────────────────────
+    final syncCoordinator = SyncCoordinator(
+      client: gatewayClient,
+      sessionRemote: sessionDatasource,
+      agentRemote: agentDatasource,
+      messageRemote: messageDatasource,
+      sessionLocal: sessionLocalDatasource,
+      agentLocal: agentLocalDatasource,
+      messageLocal: messageLocalDatasource,
+    );
+
     // ── Register all dependencies first ────────────
     _container[FlutterSecureStorage] = secureStorage;
     _container[SettingsLocalDataSource] = settingsDatasource;
     _container[SettingsRepository] = settingsRepository;
 
     _container[GatewayWebSocketClient] = gatewayClient;
-    _container[NotificationService] = notificationService;
+    _container[SyncCoordinator] = syncCoordinator;
 
     _container[MessageRemoteDataSource] = messageDatasource;
     _container[SessionRemoteDataSource] = sessionDatasource;

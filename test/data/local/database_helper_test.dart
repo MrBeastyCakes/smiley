@@ -11,7 +11,7 @@ void main() {
     late DatabaseHelper dbHelper;
 
     setUp(() async {
-      dbHelper = DatabaseHelper();
+      dbHelper = DatabaseHelper.test('db_helper_test');
       await dbHelper.deleteDatabaseFile();
     });
 

@@ -38,7 +38,7 @@ void main() {
     );
 
     setUp(() async {
-      dbHelper = DatabaseHelper();
+      dbHelper = DatabaseHelper.test('session_local_test');
       await dbHelper.deleteDatabaseFile();
       dataSource = SessionLocalDataSource(dbHelper: dbHelper);
     });

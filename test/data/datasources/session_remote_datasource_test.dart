@@ -33,143 +33,70 @@ void main() {
   });
 
   group('listSessions', () {
-    test('should send correct JSON and decode response', () async {
-      when(() => mockClient.isConnected).thenReturn(true);
-      when(() => mockClient.send(any())).thenAnswer((_) async {});
-      when(() => mockClient.messageStream).thenAnswer(
-        (_) => Stream.fromIterable([
-          {
-            'type': 'session_list',
-            'sessions': tSessionJsonList,
-          }
-        ]),
+    test('should call sendRequest and decode response', () async {
+      when(() => mockClient.sendRequest(any())).thenAnswer(
+        (_) async => {'sessions': tSessionJsonList},
       );
 
       final result = await dataSource.listSessions();
 
       expect(result.length, 1);
       expect(result.first.id, 'session-1');
-      verify(() => mockClient.send({'type': 'list_sessions'})).called(1);
+      verify(() => mockClient.sendRequest({'type': 'list_sessions'})).called(1);
     });
 
-    test('should throw GatewayException when not connected', () async {
-      when(() => mockClient.isConnected).thenReturn(false);
+    test('should throw GatewayException when sendRequest fails', () async {
+      when(() => mockClient.sendRequest(any())).thenThrow(
+        const GatewayException('Not connected', code: 'NOT_CONNECTED'),
+      );
 
       expect(
         () => dataSource.listSessions(),
         throwsA(
-          isA<GatewayException>().having(
-            (e) => e.message,
-            'message',
-            'Not connected',
-          ),
+          isA<GatewayException>().having((e) => e.message, 'message', 'Not connected'),
         ),
       );
     });
   });
 
   group('getSessionById', () {
-    test('should send correct JSON and decode response', () async {
-      when(() => mockClient.isConnected).thenReturn(true);
-      when(() => mockClient.send(any())).thenAnswer((_) async {});
-      when(() => mockClient.messageStream).thenAnswer(
-        (_) => Stream.fromIterable([
-          {
-            'type': 'session_detail',
-            'session': tSessionJson,
-          }
-        ]),
+    test('should call sendRequest and decode response', () async {
+      when(() => mockClient.sendRequest(any())).thenAnswer(
+        (_) async => {'session': tSessionJson},
       );
 
       final result = await dataSource.getSessionById('session-1');
 
       expect(result.id, 'session-1');
       expect(result.title, 'Test Session');
-      verify(() => mockClient.send({'type': 'get_session', 'id': 'session-1'})).called(1);
-    });
-
-    test('should throw GatewayException when not connected', () async {
-      when(() => mockClient.isConnected).thenReturn(false);
-
-      expect(
-        () => dataSource.getSessionById('session-1'),
-        throwsA(
-          isA<GatewayException>().having(
-            (e) => e.message,
-            'message',
-            'Not connected',
-          ),
-        ),
-      );
+      verify(() => mockClient.sendRequest({'type': 'get_session', 'id': 'session-1'})).called(1);
     });
   });
 
   group('pinSession', () {
-    test('should send correct JSON', () async {
-      when(() => mockClient.isConnected).thenReturn(true);
-      when(() => mockClient.send(any())).thenAnswer((_) async {});
-      when(() => mockClient.messageStream).thenAnswer(
-        (_) => Stream.fromIterable([
-          {'type': 'session_pinned'}
-        ]),
-      );
+    test('should call sendRequest', () async {
+      when(() => mockClient.sendRequest(any())).thenAnswer((_) async => {});
 
       await dataSource.pinSession('session-1', true);
 
-      verify(() => mockClient.send({'type': 'pin_session', 'id': 'session-1', 'pinned': true})).called(1);
-    });
-
-    test('should throw GatewayException when not connected', () async {
-      when(() => mockClient.isConnected).thenReturn(false);
-
-      expect(
-        () => dataSource.pinSession('session-1', true),
-        throwsA(
-          isA<GatewayException>().having(
-            (e) => e.message,
-            'message',
-            'Not connected',
-          ),
-        ),
-      );
+      verify(() => mockClient.sendRequest({'type': 'pin_session', 'id': 'session-1', 'pinned': true})).called(1);
     });
   });
 
   group('archiveSession', () {
-    test('should send correct JSON', () async {
-      when(() => mockClient.isConnected).thenReturn(true);
-      when(() => mockClient.send(any())).thenAnswer((_) async {});
-      when(() => mockClient.messageStream).thenAnswer(
-        (_) => Stream.fromIterable([
-          {'type': 'session_archived'}
-        ]),
-      );
+    test('should call sendRequest', () async {
+      when(() => mockClient.sendRequest(any())).thenAnswer((_) async => {});
 
       await dataSource.archiveSession('session-1');
 
-      verify(() => mockClient.send({'type': 'archive_session', 'id': 'session-1'})).called(1);
-    });
-
-    test('should throw GatewayException when not connected', () async {
-      when(() => mockClient.isConnected).thenReturn(false);
-
-      expect(
-        () => dataSource.archiveSession('session-1'),
-        throwsA(
-          isA<GatewayException>().having(
-            (e) => e.message,
-            'message',
-            'Not connected',
-          ),
-        ),
-      );
+      verify(() => mockClient.sendRequest({'type': 'archive_session', 'id': 'session-1'})).called(1);
     });
   });
 
   group('watchSessions', () {
-    test('should filter session_update messages', () async {
+    test('should filter session_update events', () async {
       final controller = StreamController<Map<String, dynamic>>();
-      when(() => mockClient.messageStream).thenAnswer((_) => controller.stream);
+      when(() => mockClient.eventStream).thenAnswer((_) => controller.stream);
 
       final stream = dataSource.watchSessions();
       final results = <List<SessionModel>>[];
