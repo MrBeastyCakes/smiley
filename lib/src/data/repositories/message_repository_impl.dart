@@ -110,20 +110,24 @@ class MessageRepositoryImpl implements MessageRepository {
         .asyncMap((model) async {
           await localDataSource.saveMessage(model);
           return Right<Failure, ChatMessage>(model.toEntity());
-        })
-        .transform(StreamTransformer.fromHandlers(
-          handleError: (error, stackTrace, sink) {
-            sink.add(
-              Left<Failure, ChatMessage>(
-                error is GatewayException
-                    ? GatewayFailure(error.message, code: error.code)
-                    : NetworkFailure('New message stream error: $error'),
-              ),
-            );
-          },
-        ));
+        });
 
-    return StreamGroup.merge([localStream, remoteStream]);
+    return Stream<Either<Failure, ChatMessage>>.multi((controller) {
+      final sub1 = localStream.listen(controller.add, onError: controller.addError);
+      final sub2 = remoteStream.listen(controller.add, onError: (e, st) {
+        controller.add(
+          Left<Failure, ChatMessage>(
+            e is GatewayException
+                ? GatewayFailure(e.message, code: e.code)
+                : NetworkFailure('New message stream error: $e'),
+          ),
+        );
+      });
+      controller.onCancel = () async {
+        await sub1.cancel();
+        await sub2.cancel();
+      };
+    });
   }
 
   @override
