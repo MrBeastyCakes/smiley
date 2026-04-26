@@ -9,6 +9,13 @@ class LoadSessions extends SessionsEvent {
   const LoadSessions();
 }
 
+class CreateSession extends SessionsEvent {
+  final String? title;
+  final String? agentId;
+  const CreateSession({this.title, this.agentId});
+  @override List<Object?> get props => [title, agentId];
+}
+
 class RefreshSessions extends SessionsEvent {
   const RefreshSessions();
 }

@@ -6,6 +6,7 @@ import '../models/session_model.dart';
 abstract class SessionRemoteDataSource {
   Future<List<SessionModel>> listSessions();
   Future<SessionModel> getSessionById(String id);
+  Future<SessionModel> createSession({String? title, String? agentId});
   Future<void> pinSession(String id, bool pinned);
   Future<void> archiveSession(String id);
   Stream<List<SessionModel>> watchSessions();
@@ -28,6 +29,16 @@ class SessionRemoteDataSourceImpl implements SessionRemoteDataSource {
   @override
   Future<SessionModel> getSessionById(String id) async {
     final response = await client.sendRequest({'type': 'get_session', 'id': id});
+    return SessionModel.fromJson(response['session'] as Map<String, dynamic>);
+  }
+
+  @override
+  Future<SessionModel> createSession({String? title, String? agentId}) async {
+    final response = await client.sendRequest({
+      'type': 'create_session',
+      'title': title,
+      'agentId': agentId,
+    });
     return SessionModel.fromJson(response['session'] as Map<String, dynamic>);
   }
 

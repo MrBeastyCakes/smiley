@@ -21,6 +21,7 @@ class SessionsBloc extends Bloc<SessionsEvent, SessionsState> {
         super(const SessionsLoading()) {
     on<LoadSessions>(_onLoad);
     on<RefreshSessions>(_onLoad);
+    on<CreateSession>(_onCreate);
     on<PinSession>(_onPin);
     on<ArchiveSession>(_onArchive);
     _subscribe();
@@ -58,6 +59,18 @@ class SessionsBloc extends Bloc<SessionsEvent, SessionsState> {
     result.fold(
       (failure) => emit(SessionsError(message: failure.message)),
       (_) => add(const RefreshSessions()),
+    );
+  }
+
+  Future<void> _onCreate(CreateSession event, Emitter<SessionsState> emit) async {
+    emit(const SessionsLoading());
+    final result = await _repository.createSession(
+      title: event.title,
+      agentId: event.agentId,
+    );
+    result.fold(
+      (failure) => emit(SessionsError(message: failure.message)),
+      (session) => emit(SessionCreated(session: session)),
     );
   }
 

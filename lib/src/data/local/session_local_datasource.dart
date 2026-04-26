@@ -91,6 +91,24 @@ class SessionLocalDataSource implements SessionRemoteDataSource {
   }
 
   @override
+  Future<SessionModel> createSession({String? title, String? agentId}) async {
+    final now = DateTime.now().toIso8601String();
+    final id = 'local-${now}-${DateTime.now().millisecondsSinceEpoch}';
+    final session = SessionModel(
+      id: id,
+      title: title ?? 'New Chat',
+      agentId: agentId,
+      createdAt: now,
+      updatedAt: now,
+      messageCount: 0,
+      isPinned: false,
+      isArchived: false,
+    );
+    await saveSession(session);
+    return session;
+  }
+
+  @override
   Future<void> pinSession(String id, bool pinned) async {
     final db = await _db;
     final count = await db.update(

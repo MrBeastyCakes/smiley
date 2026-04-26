@@ -38,36 +38,56 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget build(BuildContext context) {
     final tokens = DesignTokens.forBrightness(Brightness.dark);
 
-    return Scaffold(
-      backgroundColor: tokens.bgDeep,
-      body: SafeArea(
-        child: Column(
-          children: [
-            const ConnectionStatusBanner(),
-            Expanded(
-              child: IndexedStack(
-                index: _currentIndex,
-                children: const [
-                  _ChatTab(),
-                  _AgentsTab(),
-                  SettingsScreen(),
-                ],
+    return BlocListener<SessionsBloc, SessionsState>(
+      listener: (context, state) {
+        if (state is SessionCreated) {
+          context.push('/chat/${state.session.id}');
+          context.read<SessionsBloc>().add(const RefreshSessions());
+        }
+      },
+      child: Scaffold(
+        backgroundColor: tokens.bgDeep,
+        body: SafeArea(
+          child: Column(
+            children: [
+              const ConnectionStatusBanner(),
+              Expanded(
+                child: IndexedStack(
+                  index: _currentIndex,
+                  children: const [
+                    _ChatTab(),
+                    _AgentsTab(),
+                    SettingsScreen(),
+                  ],
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
-      ),
-      bottomNavigationBar: BottomNavigationBar(
-        currentIndex: _currentIndex,
-        onTap: (index) => setState(() => _currentIndex = index),
-        backgroundColor: tokens.bgSurface,
-        selectedItemColor: tokens.accentGold,
-        unselectedItemColor: tokens.textMuted,
-        type: BottomNavigationBarType.fixed,
-        elevation: 0,
-        items: _tabs
-            .map((t) => BottomNavigationBarItem(icon: Icon(t.icon), label: t.label))
-            .toList(),
+        floatingActionButton: _currentIndex == 0
+          ? FloatingActionButton(
+              onPressed: () {
+                context.read<SessionsBloc>().add(
+                  const CreateSession(title: 'New Chat'),
+                );
+              },
+              backgroundColor: tokens.accentGold,
+              foregroundColor: tokens.textInverse,
+              child: const Icon(Icons.add),
+            )
+          : null,
+        bottomNavigationBar: BottomNavigationBar(
+          currentIndex: _currentIndex,
+          onTap: (index) => setState(() => _currentIndex = index),
+          backgroundColor: tokens.bgSurface,
+          selectedItemColor: tokens.accentGold,
+          unselectedItemColor: tokens.textMuted,
+          type: BottomNavigationBarType.fixed,
+          elevation: 0,
+          items: _tabs
+              .map((t) => BottomNavigationBarItem(icon: Icon(t.icon), label: t.label))
+              .toList(),
+        ),
       ),
     );
   }

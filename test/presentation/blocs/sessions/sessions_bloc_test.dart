@@ -29,6 +29,9 @@ class _MockSessionRepository implements SessionRepository {
   Future<Either<Failure, Session>> getSessionById(String id) async => throw UnimplementedError();
 
   @override
+  Future<Either<Failure, Session>> createSession({String? title, String? agentId}) async => throw UnimplementedError();
+
+  @override
   Future<Either<Failure, void>> pinSession(String id, bool pinned) async => const Right(null);
 
   @override

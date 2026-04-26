@@ -93,6 +93,39 @@ class SessionRepositoryImpl implements SessionRepository {
     }
   }
 
+  @override
+  Future<Either<Failure, Session>> createSession({String? title, String? agentId}) async {
+    try {
+      // 1. Save locally immediately for instant UI feedback.
+      final localModel = await localDataSource.createSession(
+        title: title,
+        agentId: agentId,
+      );
+
+      // 2. Background sync to remote.
+      if (_hasRemote) {
+        unawaited(Future(() async {
+          try {
+            final remoteModel = await remoteDataSource!.createSession(
+              title: title,
+              agentId: agentId,
+            );
+            // Overwrite local with remote-confirmed (has real ID, timestamps, etc.)
+            await localDataSource.saveSession(remoteModel);
+          } catch (_) {
+            // Remote failed — local session remains authoritative.
+          }
+        }));
+      }
+
+      return Right(localModel.toEntity());
+    } on StorageException catch (e) {
+      return Left(StorageFailure(e.message, code: e.code));
+    } catch (e) {
+      return Left(UnexpectedFailure('Failed to create session: $e'));
+    }
+  }
+
   // ── Write ───────────────────────────────────────
 
   @override

@@ -15,6 +15,12 @@ class SessionsLoaded extends SessionsState {
   @override List<Object?> get props => [sessions];
 }
 
+class SessionCreated extends SessionsState {
+  final Session session;
+  const SessionCreated({required this.session});
+  @override List<Object?> get props => [session];
+}
+
 class SessionsError extends SessionsState {
   final String message;
   const SessionsError({required this.message});
