@@ -1,3 +1,6 @@
+import 'dart:async';
+import 'package:async/async.dart';
+
 import 'package:dartz/dartz.dart';
 
 import '../../core/errors/exceptions.dart';
@@ -5,69 +8,120 @@ import '../../core/errors/failures.dart';
 import '../../domain/entities/chat_message.dart';
 import '../../domain/repositories/message_repository.dart';
 import '../datasources/message_remote_datasource.dart';
+import '../local/message_local_datasource.dart';
+import '../models/chat_message_model.dart';
 
+/// Local-first repository for [ChatMessage] operations.
+///
+/// Messages are written to SQLite immediately and optionally synced to the
+/// gateway when a connection is available.
 class MessageRepositoryImpl implements MessageRepository {
-  final MessageRemoteDataSource remoteDataSource;
+  final MessageLocalDataSource localDataSource;
+  final MessageRemoteDataSource? remoteDataSource;
 
-  const MessageRepositoryImpl({required this.remoteDataSource});
+  const MessageRepositoryImpl({
+    required this.localDataSource,
+    this.remoteDataSource,
+  });
+
+  bool get _hasRemote => remoteDataSource != null;
+
+  List<ChatMessage> _modelsToEntities(List<ChatMessageModel> models) =>
+      models.map((m) => m.toEntity()).toList();
 
   @override
   Future<Either<Failure, List<ChatMessage>>> getMessages(String sessionId) async {
     try {
-      final models = await remoteDataSource.listMessages(sessionId);
-      return Right(models.map((m) => m.toEntity()).toList());
-    } on GatewayException catch (e) {
-      return Left(GatewayFailure(e.message, code: e.code));
+      final localModels = await localDataSource.listMessages(sessionId);
+      final localEntities = _modelsToEntities(localModels);
+
+      if (_hasRemote) {
+        unawaited(_syncMessagesFromRemote(sessionId));
+      }
+
+      return Right(localEntities);
+    } on StorageException catch (e) {
+      return Left(StorageFailure(e.message, code: e.code));
     } catch (e) {
-      return Left(UnexpectedFailure('Unexpected error while getting messages'));
+      return Left(UnexpectedFailure('Failed to get messages: $e'));
+    }
+  }
+
+  Future<void> _syncMessagesFromRemote(String sessionId) async {
+    try {
+      final remoteModels = await remoteDataSource!.listMessages(sessionId);
+      await localDataSource.saveMessages(remoteModels);
+    } catch (_) {
+      // Local cache remains authoritative.
     }
   }
 
   @override
   Future<Either<Failure, ChatMessage>> sendMessage(String sessionId, String text) async {
     try {
-      final model = await remoteDataSource.sendMessage(sessionId, text);
-      return Right(model.toEntity());
-    } on GatewayException catch (e) {
-      return Left(GatewayFailure(e.message, code: e.code));
+      // 1. Save locally immediately (pending status).
+      final localModel = await localDataSource.sendMessage(sessionId, text);
+
+      // 2. Attempt remote send.
+      if (_hasRemote) {
+        try {
+          final remoteModel = await remoteDataSource!.sendMessage(sessionId, text);
+          // Overwrite local pending copy with server-confirmed message.
+          await localDataSource.saveMessage(remoteModel);
+          return Right(remoteModel.toEntity());
+        } catch (_) {
+          // Remote failed — return the local pending message.
+          return Right(localModel.toEntity());
+        }
+      }
+
+      return Right(localModel.toEntity());
+    } on StorageException catch (e) {
+      return Left(StorageFailure(e.message, code: e.code));
     } catch (e) {
-      return Left(UnexpectedFailure('Unexpected error while sending message'));
+      return Left(UnexpectedFailure('Failed to send message: $e'));
     }
   }
 
   @override
   Stream<Either<Failure, ChatMessage>> watchNewMessages(String sessionId) {
-    return remoteDataSource.watchNewMessages(sessionId).map(
+    final localStream = localDataSource.watchNewMessages(sessionId).map(
           (model) => Right<Failure, ChatMessage>(model.toEntity()),
-        ).handleError((Object error) {
-      if (error is GatewayException) {
-        return Left<Failure, ChatMessage>(
-          GatewayFailure(error.message, code: error.code),
         );
-      }
-      return Left<Failure, ChatMessage>(
-        UnexpectedFailure('Unexpected error while watching new messages'),
-      );
-    });
+
+    if (!_hasRemote) return localStream;
+
+    final remoteStream = remoteDataSource!.watchNewMessages(sessionId).asyncMap(
+      (model) async {
+        await localDataSource.saveMessage(model);
+        return Right<Failure, ChatMessage>(model.toEntity());
+      },
+    ).handleError(
+      (Object error) => Left<Failure, ChatMessage>(
+        error is GatewayException
+            ? GatewayFailure(error.message, code: error.code)
+            : NetworkFailure('Message stream error: $error'),
+      ),
+    );
+
+    return StreamGroup.merge([localStream, remoteStream]);
   }
 
   @override
   Stream<Either<Failure, String>> watchMessageStream(String sessionId) {
-    return remoteDataSource.watchMessageEvents().where(
+    if (!_hasRemote) return const Stream.empty();
+
+    return remoteDataSource!.watchMessageEvents().where(
           (json) =>
               json['type'] == 'message_chunk' && json['sessionId'] == sessionId,
         ).map(
-          (json) =>
-              Right<Failure, String>(json['chunk'] as String? ?? ''),
-        ).handleError((Object error) {
-      if (error is GatewayException) {
-        return Left<Failure, String>(
-          GatewayFailure(error.message, code: error.code),
-        );
-      }
-      return Left<Failure, String>(
-        UnexpectedFailure('Unexpected error while watching message stream'),
-      );
-    });
+          (json) => Right<Failure, String>(json['chunk'] as String? ?? ''),
+        ).handleError(
+      (Object error) => Left<Failure, String>(
+        error is GatewayException
+            ? GatewayFailure(error.message, code: error.code)
+            : NetworkFailure('Message stream error: $error'),
+      ),
+    );
   }
 }

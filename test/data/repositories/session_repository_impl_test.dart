@@ -1,245 +1,278 @@
+import 'dart:async';
+
 import 'package:dartz/dartz.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:openclaw_client/src/core/errors/exceptions.dart';
 import 'package:openclaw_client/src/core/errors/failures.dart';
 import 'package:openclaw_client/src/data/datasources/session_remote_datasource.dart';
+import 'package:openclaw_client/src/data/local/database_helper.dart';
+import 'package:openclaw_client/src/data/local/session_local_datasource.dart';
 import 'package:openclaw_client/src/data/models/session_model.dart';
 import 'package:openclaw_client/src/data/repositories/session_repository_impl.dart';
 import 'package:openclaw_client/src/domain/entities/session.dart';
 
+import '../../helpers/sqflite_test_helper.dart';
+
 class MockSessionRemoteDataSource extends Mock implements SessionRemoteDataSource {}
 
 void main() {
-  late MockSessionRemoteDataSource mockDataSource;
-  late SessionRepositoryImpl repository;
+  initSqfliteFfi();
 
-  final tSessionModel = SessionModel(
-    id: 'session-1',
-    title: 'Test Session',
-    agentId: 'agent-1',
-    createdAt: '2026-04-25T12:00:00.000',
-    updatedAt: '2026-04-25T12:00:00.000',
-    messageCount: 5,
-    isPinned: false,
-    isArchived: false,
-    lastMessagePreview: 'Hello',
-  );
+  group('SessionRepositoryImpl (local-first)', () {
+    late DatabaseHelper dbHelper;
+    late SessionLocalDataSource localDataSource;
+    late MockSessionRemoteDataSource mockRemote;
+    late SessionRepositoryImpl repository;
 
-  final tSession = tSessionModel.toEntity();
-  final tSessionModels = [tSessionModel];
-  final tSessions = [tSession];
+    final tSessionModel = SessionModel(
+      id: 'session-1',
+      title: 'Test Session',
+      agentId: 'agent-1',
+      createdAt: '2026-04-25T12:00:00.000',
+      updatedAt: '2026-04-25T12:00:00.000',
+      messageCount: 5,
+      isPinned: false,
+      isArchived: false,
+      lastMessagePreview: 'Hello',
+    );
 
-  setUp(() {
-    mockDataSource = MockSessionRemoteDataSource();
-    repository = SessionRepositoryImpl(remoteDataSource: mockDataSource);
-  });
+    final tSession = tSessionModel.toEntity();
 
-  group('getSessions', () {
-    test('should return Right(List<Session>) on success', () async {
-      when(() => mockDataSource.listSessions()).thenAnswer((_) async => tSessionModels);
-
-      final result = await repository.getSessions();
-
-      expect(result.isRight(), true);
-      result.fold(
-        (_) => fail('should be Right'),
-        (sessions) {
-          expect(sessions.length, 1);
-          expect(sessions.first.id, 'session-1');
-        },
-      );
-      verify(() => mockDataSource.listSessions()).called(1);
+    setUp(() async {
+      dbHelper = DatabaseHelper();
+      await dbHelper.deleteDatabaseFile();
+      localDataSource = SessionLocalDataSource(dbHelper: dbHelper);
     });
 
-    test('should return Left(GatewayFailure) when datasource throws GatewayException', () async {
-      when(() => mockDataSource.listSessions()).thenThrow(
-        const GatewayException('Gateway error', code: 'GW_ERR'),
-      );
-
-      final result = await repository.getSessions();
-
-      expect(
-        result,
-        equals(const Left<Failure, List<Session>>(GatewayFailure('Gateway error', code: 'GW_ERR'))),
-      );
-      verify(() => mockDataSource.listSessions()).called(1);
+    tearDown(() async {
+      await dbHelper.close();
     });
 
-    test('should return Left(NetworkFailure) on unexpected exception', () async {
-      when(() => mockDataSource.listSessions()).thenThrow(Exception('boom'));
+    group('local-only (no remote)', () {
+      setUp(() {
+        repository = SessionRepositoryImpl(localDataSource: localDataSource);
+      });
 
-      final result = await repository.getSessions();
+      test('getSessions returns local data even when empty', () async {
+        final result = await repository.getSessions();
+        expect(result.isRight(), true);
+        result.fold(
+          (_) => fail('should be Right'),
+          (sessions) => expect(sessions, isEmpty),
+        );
+      });
 
-      expect(result, isA<Left<Failure, List<Session>>>());
-      result.fold(
-        (failure) => expect(failure.message, 'Failed to get sessions: Exception: boom'),
-        (_) => fail('should be Left'),
-      );
-      verify(() => mockDataSource.listSessions()).called(1);
-    });
-  });
+      test('getSessions returns saved local sessions', () async {
+        await localDataSource.saveSession(tSessionModel);
+        final result = await repository.getSessions();
+        result.fold(
+          (_) => fail('should be Right'),
+          (sessions) {
+            expect(sessions.length, 1);
+            expect(sessions.first.id, 'session-1');
+          },
+        );
+      });
 
-  group('getSessionById', () {
-    test('should return Right(Session) on success', () async {
-      when(() => mockDataSource.getSessionById(any())).thenAnswer((_) async => tSessionModel);
+      test('getSessionById returns local session', () async {
+        await localDataSource.saveSession(tSessionModel);
+        final result = await repository.getSessionById('session-1');
+        expect(result, equals(Right<Failure, Session>(tSession)));
+      });
 
-      final result = await repository.getSessionById('session-1');
+      test('getSessionById returns StorageFailure when not found', () async {
+        final result = await repository.getSessionById('nonexistent');
+        expect(result.isLeft(), true);
+        result.fold(
+          (failure) => expect(failure, isA<StorageFailure>()),
+          (_) => fail('should be Left'),
+        );
+      });
 
-      expect(result, equals(Right<Failure, Session>(tSession)));
-      verify(() => mockDataSource.getSessionById('session-1')).called(1);
-    });
+      test('pinSession updates local session', () async {
+        await localDataSource.saveSession(tSessionModel);
+        final result = await repository.pinSession('session-1', true);
+        expect(result, equals(const Right<Failure, void>(null)));
 
-    test('should return Left(GatewayFailure) when datasource throws GatewayException', () async {
-      when(() => mockDataSource.getSessionById(any())).thenThrow(
-        const GatewayException('Not found', code: 'NOT_FOUND'),
-      );
+        final updated = await localDataSource.getSessionById('session-1');
+        expect(updated.isPinned, true);
+      });
 
-      final result = await repository.getSessionById('session-1');
+      test('archiveSession updates local session', () async {
+        await localDataSource.saveSession(tSessionModel);
+        final result = await repository.archiveSession('session-1');
+        expect(result, equals(const Right<Failure, void>(null)));
 
-      expect(
-        result,
-        equals(const Left<Failure, Session>(GatewayFailure('Not found', code: 'NOT_FOUND'))),
-      );
-      verify(() => mockDataSource.getSessionById('session-1')).called(1);
-    });
+        final updated = await localDataSource.getSessionById('session-1');
+        expect(updated.isArchived, true);
+      });
 
-    test('should return Left(NetworkFailure) on unexpected exception', () async {
-      when(() => mockDataSource.getSessionById(any())).thenThrow(Exception('boom'));
-
-      final result = await repository.getSessionById('session-1');
-
-      expect(result, isA<Left<Failure, Session>>());
-      result.fold(
-        (failure) => expect(failure.message, 'Failed to get session: Exception: boom'),
-        (_) => fail('should be Left'),
-      );
-      verify(() => mockDataSource.getSessionById('session-1')).called(1);
-    });
-  });
-
-  group('pinSession', () {
-    test('should return Right(void) on success', () async {
-      when(() => mockDataSource.pinSession(any(), any())).thenAnswer((_) async {});
-
-      final result = await repository.pinSession('session-1', true);
-
-      expect(result, equals(const Right<Failure, void>(null)));
-      verify(() => mockDataSource.pinSession('session-1', true)).called(1);
-    });
-
-    test('should return Left(GatewayFailure) when datasource throws GatewayException', () async {
-      when(() => mockDataSource.pinSession(any(), any())).thenThrow(
-        const GatewayException('Forbidden', code: 'FORBIDDEN'),
-      );
-
-      final result = await repository.pinSession('session-1', true);
-
-      expect(
-        result,
-        equals(const Left<Failure, void>(GatewayFailure('Forbidden', code: 'FORBIDDEN'))),
-      );
-      verify(() => mockDataSource.pinSession('session-1', true)).called(1);
+      test('watchSessions emits local sessions', () async {
+        await localDataSource.saveSession(tSessionModel);
+        final result = await repository.watchSessions().first;
+        expect(result.isRight(), true);
+        result.fold(
+          (_) => fail('should be Right'),
+          (sessions) => expect(sessions.first.id, 'session-1'),
+        );
+      });
     });
 
-    test('should return Left(NetworkFailure) on unexpected exception', () async {
-      when(() => mockDataSource.pinSession(any(), any())).thenThrow(Exception('boom'));
+    group('with remote', () {
+      setUp(() {
+        mockRemote = MockSessionRemoteDataSource();
+        repository = SessionRepositoryImpl(
+          localDataSource: localDataSource,
+          remoteDataSource: mockRemote,
+        );
+      });
 
-      final result = await repository.pinSession('session-1', true);
+      test('getSessions returns local immediately and background syncs remote', () async {
+        await localDataSource.saveSession(tSessionModel);
+        final remoteModel = SessionModel(
+          id: tSessionModel.id,
+          title: 'Remote Title',
+          agentId: tSessionModel.agentId,
+          createdAt: tSessionModel.createdAt,
+          updatedAt: tSessionModel.updatedAt,
+          messageCount: tSessionModel.messageCount,
+          isPinned: tSessionModel.isPinned,
+          isArchived: tSessionModel.isArchived,
+          lastMessagePreview: tSessionModel.lastMessagePreview,
+        );
+        when(() => mockRemote.listSessions()).thenAnswer((_) async => [remoteModel]);
 
-      expect(result, isA<Left<Failure, void>>());
-      result.fold(
-        (failure) => expect(failure.message, 'Failed to pin session: Exception: boom'),
-        (_) => fail('should be Left'),
-      );
-      verify(() => mockDataSource.pinSession('session-1', true)).called(1);
-    });
-  });
+        final result = await repository.getSessions();
+        expect(result.isRight(), true);
+        result.fold(
+          (_) => fail('should be Right'),
+          (sessions) => expect(sessions.first.title, 'Test Session'),
+        );
 
-  group('archiveSession', () {
-    test('should return Right(void) on success', () async {
-      when(() => mockDataSource.archiveSession(any())).thenAnswer((_) async {});
+        // Background sync should eventually update local store.
+        await Future.delayed(const Duration(milliseconds: 200));
+        final localAfter = await localDataSource.getSessionById('session-1');
+        expect(localAfter.title, 'Remote Title');
+      });
 
-      final result = await repository.archiveSession('session-1');
+      test('getSessions silently ignores remote failure', () async {
+        await localDataSource.saveSession(tSessionModel);
+        when(() => mockRemote.listSessions()).thenThrow(
+          const GatewayException('Remote error', code: 'REMOTE_ERR'),
+        );
 
-      expect(result, equals(const Right<Failure, void>(null)));
-      verify(() => mockDataSource.archiveSession('session-1')).called(1);
-    });
+        final result = await repository.getSessions();
+        expect(result.isRight(), true);
+      });
 
-    test('should return Left(GatewayFailure) when datasource throws GatewayException', () async {
-      when(() => mockDataSource.archiveSession(any())).thenThrow(
-        const GatewayException('Not found', code: 'NOT_FOUND'),
-      );
+      test('getSessionById returns local and background refreshes remote', () async {
+        await localDataSource.saveSession(tSessionModel);
+        final remoteModel = SessionModel(
+          id: tSessionModel.id,
+          title: tSessionModel.title,
+          agentId: tSessionModel.agentId,
+          createdAt: tSessionModel.createdAt,
+          updatedAt: tSessionModel.updatedAt,
+          messageCount: 99,
+          isPinned: tSessionModel.isPinned,
+          isArchived: tSessionModel.isArchived,
+          lastMessagePreview: tSessionModel.lastMessagePreview,
+        );
+        when(() => mockRemote.getSessionById(any())).thenAnswer((_) async => remoteModel);
 
-      final result = await repository.archiveSession('session-1');
+        final result = await repository.getSessionById('session-1');
+        expect(result, equals(Right<Failure, Session>(tSession)));
 
-      expect(
-        result,
-        equals(const Left<Failure, void>(GatewayFailure('Not found', code: 'NOT_FOUND'))),
-      );
-      verify(() => mockDataSource.archiveSession('session-1')).called(1);
-    });
+        await Future.delayed(const Duration(milliseconds: 200));
+        final localAfter = await localDataSource.getSessionById('session-1');
+        expect(localAfter.messageCount, 99);
+      });
 
-    test('should return Left(NetworkFailure) on unexpected exception', () async {
-      when(() => mockDataSource.archiveSession(any())).thenThrow(Exception('boom'));
+      test('pinSession local-first then syncs to remote', () async {
+        await localDataSource.saveSession(tSessionModel);
+        when(() => mockRemote.pinSession(any(), any())).thenAnswer((_) async {});
 
-      final result = await repository.archiveSession('session-1');
+        final result = await repository.pinSession('session-1', true);
+        expect(result, equals(const Right<Failure, void>(null)));
 
-      expect(result, isA<Left<Failure, void>>());
-      result.fold(
-        (failure) => expect(failure.message, 'Failed to archive session: Exception: boom'),
-        (_) => fail('should be Left'),
-      );
-      verify(() => mockDataSource.archiveSession('session-1')).called(1);
-    });
-  });
+        verify(() => mockRemote.pinSession('session-1', true)).called(1);
+      });
 
-  group('watchSessions', () {
-    test('should emit Right(List<Session>) on successful stream event', () async {
-      when(() => mockDataSource.watchSessions()).thenAnswer(
-        (_) => Stream.fromIterable([tSessionModels]),
-      );
+      test('pinSession returns success even when remote fails', () async {
+        await localDataSource.saveSession(tSessionModel);
+        when(() => mockRemote.pinSession(any(), any())).thenThrow(Exception('boom'));
 
-      final result = await repository.watchSessions().first;
+        final result = await repository.pinSession('session-1', true);
+        expect(result, equals(const Right<Failure, void>(null)));
+      });
 
-      expect(result.isRight(), true);
-      result.fold(
-        (_) => fail('should be Right'),
-        (sessions) {
-          expect(sessions.length, 1);
-          expect(sessions.first.id, 'session-1');
-        },
-      );
-      verify(() => mockDataSource.watchSessions()).called(1);
-    });
+      test('archiveSession local-first then syncs to remote', () async {
+        await localDataSource.saveSession(tSessionModel);
+        when(() => mockRemote.archiveSession(any())).thenAnswer((_) async {});
 
-    test('should emit Left(GatewayFailure) when stream throws GatewayException', () async {
-      when(() => mockDataSource.watchSessions()).thenAnswer(
-        (_) => Stream.error(
-          const GatewayException('Stream error', code: 'STREAM_ERR'),
-        ),
-      );
+        final result = await repository.archiveSession('session-1');
+        expect(result, equals(const Right<Failure, void>(null)));
+        verify(() => mockRemote.archiveSession('session-1')).called(1);
+      });
 
-      final result = await repository.watchSessions().first;
+      test('watchSessions merges local and remote streams', () async {
+        await localDataSource.saveSession(tSessionModel);
+        when(() => mockRemote.watchSessions()).thenAnswer(
+          (_) => Stream.fromIterable([
+            [SessionModel(
+              id: tSessionModel.id,
+              title: 'Remote Stream',
+              agentId: tSessionModel.agentId,
+              createdAt: tSessionModel.createdAt,
+              updatedAt: tSessionModel.updatedAt,
+              messageCount: tSessionModel.messageCount,
+              isPinned: tSessionModel.isPinned,
+              isArchived: tSessionModel.isArchived,
+              lastMessagePreview: tSessionModel.lastMessagePreview,
+            )],
+          ]),
+        );
 
-      expect(
-        result,
-        equals(const Left<Failure, List<Session>>(GatewayFailure('Stream error', code: 'STREAM_ERR'))),
-      );
-    });
+        final results = await repository.watchSessions().take(2).toList();
+        expect(results.length, 2);
 
-    test('should emit Left(NetworkFailure) when stream throws unexpected error', () async {
-      when(() => mockDataSource.watchSessions()).thenAnswer(
-        (_) => Stream.error(Exception('boom')),
-      );
+        final titles = results
+            .where((e) => e.isRight())
+            .map((e) => e.getOrElse(() => []).first.title)
+            .toSet();
+        expect(titles, contains('Test Session'));
+        expect(titles, contains('Remote Stream'));
+      });
 
-      final result = await repository.watchSessions().first;
+      test('watchSessions emits GatewayFailure when remote stream errors', () async {
+        when(() => mockRemote.watchSessions()).thenAnswer(
+          (_) => Stream.error(
+            const GatewayException('Stream error', code: 'STREAM_ERR'),
+          ),
+        );
 
-      expect(result.isLeft(), true);
-      result.fold(
-        (failure) => expect(failure.message, 'Session stream error: Exception: boom'),
-        (_) => fail('should be Left'),
-      );
+        final result = await repository.watchSessions().firstWhere((e) => e.isLeft());
+        expect(
+          result,
+          equals(const Left<Failure, List<Session>>(
+            GatewayFailure('Stream error', code: 'STREAM_ERR'),
+          )),
+        );
+      });
+
+      test('watchSessions emits NetworkFailure on unexpected stream error', () async {
+        when(() => mockRemote.watchSessions()).thenAnswer(
+          (_) => Stream.error(Exception('boom')),
+        );
+
+        final result = await repository.watchSessions().firstWhere((e) => e.isLeft());
+        expect(result.isLeft(), true);
+        result.fold(
+          (failure) => expect(failure, isA<NetworkFailure>()),
+          (_) => fail('should be Left'),
+        );
+      });
     });
   });
 }

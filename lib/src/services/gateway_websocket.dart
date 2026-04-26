@@ -90,7 +90,8 @@ class GatewayWebSocketClient {
   Future<void> _attemptConnection() async {
     final settings = _settings!;
     final protocol = settings.useTls ? 'wss' : 'ws';
-    final uri = Uri.parse('$protocol://${settings.host}:${settings.port}/ws');
+    final uri = Uri.parse('$protocol://${settings.host}:${settings.port}/ws')
+        .replace(queryParameters: {'token': settings.token});
 
     _channel = WebSocketChannel.connect(
       uri,

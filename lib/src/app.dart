@@ -6,8 +6,11 @@ import 'package:go_router/go_router.dart';
 
 import 'core/di/service_locator.dart';
 import 'core/theme/app_theme.dart';
+import 'presentation/blocs/agents/agents_bloc.dart';
 import 'presentation/blocs/chat/chat_bloc.dart';
 import 'presentation/blocs/connection/connection_bloc.dart' as conn;
+import 'presentation/blocs/sessions/sessions_bloc.dart';
+import 'presentation/blocs/settings/settings_bloc.dart';
 import 'presentation/screens/chat_screen.dart';
 import 'presentation/screens/connect_screen.dart';
 import 'presentation/screens/home_screen.dart';
@@ -44,6 +47,9 @@ class OpenClawApp extends StatefulWidget {
 class _OpenClawAppState extends State<OpenClawApp> {
   late final conn.ConnectionBloc _connectionBloc;
   late final ChatBloc _chatBloc;
+  late final SessionsBloc _sessionsBloc;
+  late final AgentsBloc _agentsBloc;
+  late final SettingsBloc _settingsBloc;
   late final _ConnectionRefreshNotifier _refreshNotifier;
   late final GoRouter _router;
 
@@ -52,6 +58,9 @@ class _OpenClawAppState extends State<OpenClawApp> {
     super.initState();
     _connectionBloc = conn.ConnectionBloc();
     _chatBloc = ChatBloc();
+    _sessionsBloc = ServiceLocator.get<SessionsBloc>();
+    _agentsBloc = ServiceLocator.get<AgentsBloc>();
+    _settingsBloc = ServiceLocator.get<SettingsBloc>();
     _refreshNotifier = _ConnectionRefreshNotifier(_connectionBloc);
     _router = _createRouter();
   }
@@ -107,6 +116,9 @@ class _OpenClawAppState extends State<OpenClawApp> {
     _refreshNotifier.dispose();
     _connectionBloc.close();
     _chatBloc.close();
+    _sessionsBloc.close();
+    _agentsBloc.close();
+    _settingsBloc.close();
     super.dispose();
   }
 
@@ -116,6 +128,9 @@ class _OpenClawAppState extends State<OpenClawApp> {
       providers: [
         BlocProvider.value(value: _connectionBloc),
         BlocProvider.value(value: _chatBloc),
+        BlocProvider.value(value: _sessionsBloc),
+        BlocProvider.value(value: _agentsBloc),
+        BlocProvider.value(value: _settingsBloc),
       ],
       child: MaterialApp.router(
         title: 'OpenClaw',

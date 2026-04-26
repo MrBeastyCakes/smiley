@@ -4,6 +4,9 @@ import '../../data/datasources/agent_remote_datasource.dart';
 import '../../data/datasources/message_remote_datasource.dart';
 import '../../data/datasources/session_remote_datasource.dart';
 import '../../data/datasources/settings_local_datasource.dart';
+import '../../data/local/agent_local_datasource.dart';
+import '../../data/local/message_local_datasource.dart';
+import '../../data/local/session_local_datasource.dart';
 import '../../data/repositories/agent_repository_impl.dart';
 import '../../data/repositories/message_repository_impl.dart';
 import '../../data/repositories/session_repository_impl.dart';
@@ -12,6 +15,9 @@ import '../../domain/repositories/agent_repository.dart';
 import '../../domain/repositories/message_repository.dart';
 import '../../domain/repositories/session_repository.dart';
 import '../../domain/repositories/settings_repository.dart';
+import '../../presentation/blocs/agents/agents_bloc.dart';
+import '../../presentation/blocs/sessions/sessions_bloc.dart';
+import '../../presentation/blocs/settings/settings_bloc.dart';
 import '../../services/gateway_websocket.dart';
 import '../../services/notification_service.dart';
 
@@ -35,15 +41,29 @@ class ServiceLocator {
     final sessionDatasource = SessionRemoteDataSourceImpl(client: gatewayClient);
     final agentDatasource = AgentRemoteDataSourceImpl(client: gatewayClient);
 
+    // ── Local datasources (deferred init via getter) ──
+    final messageLocalDatasource = MessageLocalDataSource();
+    final sessionLocalDatasource = SessionLocalDataSource();
+    final agentLocalDatasource = AgentLocalDataSource();
+
     // ── Repositories ──────────────────────────────
-    final messageRepository = MessageRepositoryImpl(remoteDataSource: messageDatasource);
-    final sessionRepository = SessionRepositoryImpl(remoteDataSource: sessionDatasource);
-    final agentRepository = AgentRepositoryImpl(remoteDataSource: agentDatasource);
+    final messageRepository = MessageRepositoryImpl(
+      localDataSource: messageLocalDatasource,
+      remoteDataSource: messageDatasource,
+    );
+    final sessionRepository = SessionRepositoryImpl(
+      localDataSource: sessionLocalDatasource,
+      remoteDataSource: sessionDatasource,
+    );
+    final agentRepository = AgentRepositoryImpl(
+      localDataSource: agentLocalDatasource,
+      remoteDataSource: agentDatasource,
+    );
 
     // ── Services ──────────────────────────────────
     final notificationService = NotificationService();
 
-    // ── Register ──────────────────────────────────
+    // ── Register all dependencies first ────────────
     _container[FlutterSecureStorage] = secureStorage;
     _container[SettingsLocalDataSource] = settingsDatasource;
     _container[SettingsRepository] = settingsRepository;
@@ -55,9 +75,22 @@ class ServiceLocator {
     _container[SessionRemoteDataSource] = sessionDatasource;
     _container[AgentRemoteDataSource] = agentDatasource;
 
+    _container[MessageLocalDataSource] = messageLocalDatasource;
+    _container[SessionLocalDataSource] = sessionLocalDatasource;
+    _container[AgentLocalDataSource] = agentLocalDatasource;
+
     _container[MessageRepository] = messageRepository;
     _container[SessionRepository] = sessionRepository;
     _container[AgentRepository] = agentRepository;
+
+    // ── BLoCs (created AFTER repositories are registered) ──
+    final sessionsBloc = SessionsBloc(repository: sessionRepository);
+    final agentsBloc = AgentsBloc(repository: agentRepository);
+    final settingsBloc = SettingsBloc();
+
+    _container[SessionsBloc] = sessionsBloc;
+    _container[AgentsBloc] = agentsBloc;
+    _container[SettingsBloc] = settingsBloc;
   }
 
   static T get<T>() {

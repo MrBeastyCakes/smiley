@@ -23,6 +23,7 @@ class _ChatScreenState extends State<ChatScreen> {
   void initState() {
     super.initState();
     context.read<ChatBloc>().add(const ChatStarted());
+    context.read<ChatBloc>().add(LoadChatMessages(sessionId: widget.sessionId));
   }
 
   @override

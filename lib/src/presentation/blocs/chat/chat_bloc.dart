@@ -21,17 +21,17 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     : _repository = repository ?? ServiceLocator.get<MessageRepository>(),
       super(const ChatInitial()) {
     on<ChatStarted>(_onStarted);
+    on<LoadChatMessages>(_onLoadMessages);
     on<MessageSent>(_onMessageSent);
     on<MessageReceived>(_onMessageReceived);
     on<MessageStreamed>(_onMessageStreamed);
-    on<_LoadMessages>(_onLoadMessages);
   }
 
   Future<void> _onStarted(ChatStarted event, Emitter<ChatState> emit) async {
     emit(const ChatLoaded(messages: []));
   }
 
-  Future<void> _onLoadMessages(_LoadMessages event, Emitter<ChatState> emit) async {
+  Future<void> _onLoadMessages(LoadChatMessages event, Emitter<ChatState> emit) async {
     emit(const ChatLoading());
     final result = await _repository.getMessages(event.sessionId);
     result.fold(
@@ -116,7 +116,8 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
   }
 }
 
-class _LoadMessages extends ChatEvent {
+class LoadChatMessages extends ChatEvent {
   final String sessionId;
-  const _LoadMessages(this.sessionId);
+  const LoadChatMessages({required this.sessionId});
+  @override List<Object?> get props => [sessionId];
 }

@@ -5,10 +5,9 @@ import 'package:go_router/go_router.dart';
 import '../../core/theme/design_tokens.dart';
 import '../../domain/entities/agent.dart';
 import '../../domain/entities/session.dart';
-import '../blocs/chat/chat_bloc.dart';
+import '../blocs/agents/agents_bloc.dart';
+import '../blocs/sessions/sessions_bloc.dart';
 import '../widgets/widgets.dart';
-import 'agent_detail_screen.dart';
-import 'chat_screen.dart';
 import 'settings_screen.dart';
 
 /// Main app shell with bottom navigation: Chat, Agents, Settings.
@@ -28,51 +27,12 @@ class _HomeScreenState extends State<HomeScreen> {
     _NavigationItem(label: 'Settings', icon: Icons.settings_outlined),
   ];
 
-  static final _mockSessions = [
-    Session(
-      id: 'session-1', title: 'General chat', agentId: 'agent-1',
-      createdAt: DateTime.now().subtract(const Duration(days: 2)),
-      updatedAt: DateTime.now().subtract(const Duration(minutes: 5)),
-      messageCount: 42, lastMessagePreview: 'Let me check that for you...',
-    ),
-    Session(
-      id: 'session-2', title: 'Code review helper', agentId: 'agent-2',
-      createdAt: DateTime.now().subtract(const Duration(days: 5)),
-      updatedAt: DateTime.now().subtract(const Duration(hours: 2)),
-      messageCount: 18, isPinned: true,
-      lastMessagePreview: 'Looks good, but consider...',
-    ),
-    Session(
-      id: 'session-3', title: 'Trip planner',
-      createdAt: DateTime.now().subtract(const Duration(days: 1)),
-      updatedAt: DateTime.now().subtract(const Duration(hours: 6)),
-      messageCount: 7, lastMessagePreview: 'Here are the best flights...',
-    ),
-  ];
-
-  static final _mockAgents = [
-    Agent(
-      id: 'agent-1', name: 'Rosalina',
-      description: 'Queen of the galaxy. Warm, sarcastic, and always helpful.',
-      capabilities: const ['chat', 'search', 'summarize', 'weather'],
-      defaultAutonomy: AutonomyLevel.suggest, isActive: true,
-      lastActiveAt: DateTime.now().subtract(const Duration(minutes: 5)),
-    ),
-    Agent(
-      id: 'agent-2', name: 'CodeBot',
-      description: 'Specialized in code review, debugging, and architecture.',
-      capabilities: const ['code_review', 'debug', 'refactor', 'explain'],
-      defaultAutonomy: AutonomyLevel.confirm, isActive: true,
-      lastActiveAt: DateTime.now().subtract(const Duration(hours: 2)),
-    ),
-    Agent(
-      id: 'agent-3', name: 'Planner',
-      description: 'Travel, scheduling, and logistics assistant.',
-      capabilities: const ['travel', 'calendar', 'booking'],
-      defaultAutonomy: AutonomyLevel.observe, isActive: false,
-      lastActiveAt: DateTime.now().subtract(const Duration(days: 3)),
-    ),
-  ];
+  @override
+  void initState() {
+    super.initState();
+    context.read<SessionsBloc>().add(const LoadSessions());
+    context.read<AgentsBloc>().add(const LoadAgents());
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -83,10 +43,10 @@ class _HomeScreenState extends State<HomeScreen> {
       body: SafeArea(
         child: IndexedStack(
           index: _currentIndex,
-          children: [
-            _ChatTab(sessions: _mockSessions),
-            _AgentsTab(agents: _mockAgents),
-            const SettingsScreen(),
+          children: const [
+            _ChatTab(),
+            _AgentsTab(),
+            SettingsScreen(),
           ],
         ),
       ),
@@ -115,8 +75,7 @@ class _NavigationItem {
 // ── Chat tab ───────────────────────────────────────
 
 class _ChatTab extends StatelessWidget {
-  final List<Session> sessions;
-  const _ChatTab({required this.sessions});
+  const _ChatTab();
 
   @override
   Widget build(BuildContext context) {
@@ -130,11 +89,39 @@ class _ChatTab extends StatelessWidget {
             child: Text('Chats', style: tokens.textTheme.headlineLarge),
           ),
         ),
-        SliverList(
-          delegate: SliverChildBuilderDelegate(
-            (context, index) => _SessionCard(session: sessions[index]),
-            childCount: sessions.length,
-          ),
+        BlocBuilder<SessionsBloc, SessionsState>(
+          builder: (context, state) {
+            if (state is SessionsLoading) {
+              return const SliverFillRemaining(
+                child: Center(child: CircularProgressIndicator()),
+              );
+            }
+            if (state is SessionsError) {
+              return SliverFillRemaining(
+                child: Center(child: Text(state.message, style: tokens.textTheme.bodyMedium)),
+              );
+            }
+            if (state is SessionsLoaded) {
+              final sessions = state.sessions;
+              if (sessions.isEmpty) {
+                return SliverFillRemaining(
+                  child: Center(
+                    child: Text(
+                      'No chats yet',
+                      style: tokens.textTheme.bodyMedium?.copyWith(color: tokens.textMuted),
+                    ),
+                  ),
+                );
+              }
+              return SliverList(
+                delegate: SliverChildBuilderDelegate(
+                  (context, index) => _SessionCard(session: sessions[index]),
+                  childCount: sessions.length,
+                ),
+              );
+            }
+            return const SliverToBoxAdapter(child: SizedBox.shrink());
+          },
         ),
       ],
     );
@@ -204,8 +191,7 @@ class _SessionCard extends StatelessWidget {
 // ── Agents tab ─────────────────────────────────────
 
 class _AgentsTab extends StatelessWidget {
-  final List<Agent> agents;
-  const _AgentsTab({required this.agents});
+  const _AgentsTab();
 
   @override
   Widget build(BuildContext context) {
@@ -219,11 +205,39 @@ class _AgentsTab extends StatelessWidget {
             child: Text('Agents', style: tokens.textTheme.headlineLarge),
           ),
         ),
-        SliverList(
-          delegate: SliverChildBuilderDelegate(
-            (context, index) => _AgentCard(agent: agents[index]),
-            childCount: agents.length,
-          ),
+        BlocBuilder<AgentsBloc, AgentsState>(
+          builder: (context, state) {
+            if (state is AgentsLoading) {
+              return const SliverFillRemaining(
+                child: Center(child: CircularProgressIndicator()),
+              );
+            }
+            if (state is AgentsError) {
+              return SliverFillRemaining(
+                child: Center(child: Text(state.message, style: tokens.textTheme.bodyMedium)),
+              );
+            }
+            if (state is AgentsLoaded) {
+              final agents = state.agents;
+              if (agents.isEmpty) {
+                return SliverFillRemaining(
+                  child: Center(
+                    child: Text(
+                      'No agents yet',
+                      style: tokens.textTheme.bodyMedium?.copyWith(color: tokens.textMuted),
+                    ),
+                  ),
+                );
+              }
+              return SliverList(
+                delegate: SliverChildBuilderDelegate(
+                  (context, index) => _AgentCard(agent: agents[index]),
+                  childCount: agents.length,
+                ),
+              );
+            }
+            return const SliverToBoxAdapter(child: SizedBox.shrink());
+          },
         ),
       ],
     );

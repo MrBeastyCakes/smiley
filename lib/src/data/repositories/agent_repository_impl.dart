@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:async/async.dart';
 
 import 'package:dartz/dartz.dart';
 
@@ -7,88 +8,140 @@ import '../../core/errors/failures.dart';
 import '../../domain/entities/agent.dart';
 import '../../domain/repositories/agent_repository.dart';
 import '../datasources/agent_remote_datasource.dart';
+import '../local/agent_local_datasource.dart';
+import '../models/agent_model.dart';
 
+/// Local-first repository for [Agent] operations.
+///
+/// Agents are cached locally; writes are local-first with background sync.
 class AgentRepositoryImpl implements AgentRepository {
-  final AgentRemoteDataSource remoteDataSource;
+  final AgentLocalDataSource localDataSource;
+  final AgentRemoteDataSource? remoteDataSource;
 
-  const AgentRepositoryImpl({required this.remoteDataSource});
+  const AgentRepositoryImpl({
+    required this.localDataSource,
+    this.remoteDataSource,
+  });
+
+  bool get _hasRemote => remoteDataSource != null;
+
+  List<Agent> _modelsToEntities(List<AgentModel> models) =>
+      models.map((m) => m.toEntity()).toList();
 
   @override
   Future<Either<Failure, List<Agent>>> getAgents() async {
     try {
-      final models = await remoteDataSource.getAgents();
-      return Right(models.map((m) => m.toEntity()).toList());
-    } on ConnectionTimeoutException catch (e) {
-      return Left(NetworkFailure(e.message, code: e.code));
-    } on GatewayException catch (e) {
-      return Left(GatewayFailure(e.message, code: e.code));
+      final localModels = await localDataSource.getAgents();
+      final localEntities = _modelsToEntities(localModels);
+
+      if (_hasRemote) {
+        unawaited(_syncAgentsFromRemote());
+      }
+
+      return Right(localEntities);
+    } on StorageException catch (e) {
+      return Left(StorageFailure(e.message, code: e.code));
     } catch (e) {
-      return Left(UnexpectedFailure('Unexpected error while getting agents'));
+      return Left(UnexpectedFailure('Failed to get agents: $e'));
+    }
+  }
+
+  Future<void> _syncAgentsFromRemote() async {
+    try {
+      final remoteModels = await remoteDataSource!.getAgents();
+      await localDataSource.saveAgents(remoteModels);
+    } catch (_) {
+      // Local cache remains authoritative.
     }
   }
 
   @override
   Future<Either<Failure, Agent>> getAgentById(String id) async {
     try {
-      final model = await remoteDataSource.getAgentById(id);
-      return Right(model.toEntity());
-    } on ConnectionTimeoutException catch (e) {
-      return Left(NetworkFailure(e.message, code: e.code));
-    } on GatewayException catch (e) {
-      return Left(GatewayFailure(e.message, code: e.code));
+      final localModel = await localDataSource.getAgentById(id);
+
+      if (_hasRemote) {
+        unawaited(_syncAgentById(id));
+      }
+
+      return Right(localModel.toEntity());
+    } on StorageException catch (e) {
+      return Left(StorageFailure(e.message, code: e.code));
     } catch (e) {
-      return Left(UnexpectedFailure('Unexpected error while getting agent'));
+      return Left(UnexpectedFailure('Failed to get agent: $e'));
+    }
+  }
+
+  Future<void> _syncAgentById(String id) async {
+    try {
+      final remoteModel = await remoteDataSource!.getAgentById(id);
+      await localDataSource.saveAgent(remoteModel);
+    } catch (_) {
+      // Silently fail.
     }
   }
 
   @override
   Future<Either<Failure, void>> updateAutonomy(String id, AutonomyLevel level) async {
     try {
-      await remoteDataSource.updateAutonomy(id, level);
+      await localDataSource.updateAutonomy(id, level);
+
+      if (_hasRemote) {
+        unawaited(
+          remoteDataSource!.updateAutonomy(id, level).catchError((_) {}),
+        );
+      }
+
       return const Right(null);
-    } on ConnectionTimeoutException catch (e) {
-      return Left(NetworkFailure(e.message, code: e.code));
-    } on GatewayException catch (e) {
-      return Left(GatewayFailure(e.message, code: e.code));
+    } on StorageException catch (e) {
+      return Left(StorageFailure(e.message, code: e.code));
     } catch (e) {
-      return Left(UnexpectedFailure('Unexpected error while updating autonomy'));
+      return Left(UnexpectedFailure('Failed to update autonomy: $e'));
     }
   }
 
   @override
   Future<Either<Failure, void>> toggleActive(String id, bool active) async {
     try {
-      await remoteDataSource.toggleActive(id, active);
+      await localDataSource.toggleActive(id, active);
+
+      if (_hasRemote) {
+        unawaited(
+          remoteDataSource!.toggleActive(id, active).catchError((_) {}),
+        );
+      }
+
       return const Right(null);
-    } on ConnectionTimeoutException catch (e) {
-      return Left(NetworkFailure(e.message, code: e.code));
-    } on GatewayException catch (e) {
-      return Left(GatewayFailure(e.message, code: e.code));
+    } on StorageException catch (e) {
+      return Left(StorageFailure(e.message, code: e.code));
     } catch (e) {
-      return Left(UnexpectedFailure('Unexpected error while toggling active state'));
+      return Left(UnexpectedFailure('Failed to toggle active state: $e'));
     }
   }
 
   @override
   Stream<Either<Failure, List<Agent>>> watchAgents() {
-    return remoteDataSource.watchAgents()
-        .map(
-          (models) => Right<Failure, List<Agent>>(
-            models.map((m) => m.toEntity()).toList(),
-          ),
-        )
-        .transform(
-          StreamTransformer.fromHandlers(
-            handleError: (Object error, StackTrace stackTrace, EventSink<Either<Failure, List<Agent>>> sink) {
-              if (error is ConnectionTimeoutException) {
-                sink.add(Left(NetworkFailure(error.message, code: error.code)));
-              } else if (error is GatewayException) {
-                sink.add(Left(GatewayFailure(error.message, code: error.code)));
-              } else {
-                sink.add(Left(UnexpectedFailure('Unexpected error in watch stream')));
-              }
-            },
-          ),
+    final localStream = localDataSource.watchAgents().map(
+          (models) => Right<Failure, List<Agent>>(_modelsToEntities(models)),
         );
+
+    if (!_hasRemote) return localStream;
+
+    final remoteStream = remoteDataSource!.watchAgents().asyncMap(
+      (models) async {
+        await localDataSource.saveAgents(models);
+        return Right<Failure, List<Agent>>(_modelsToEntities(models));
+      },
+    ).handleError(
+      (Object error) => Left<Failure, List<Agent>>(
+        error is GatewayException
+            ? GatewayFailure(error.message, code: error.code)
+            : error is ConnectionTimeoutException
+                ? NetworkFailure(error.message, code: error.code)
+                : NetworkFailure('Agent stream error: $error'),
+      ),
+    );
+
+    return StreamGroup.merge([localStream, remoteStream]);
   }
 }

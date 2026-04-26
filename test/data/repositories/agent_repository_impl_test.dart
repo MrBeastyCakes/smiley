@@ -1,324 +1,258 @@
-﻿import 'package:dartz/dartz.dart';
+import 'package:dartz/dartz.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:openclaw_client/src/core/errors/exceptions.dart';
 import 'package:openclaw_client/src/core/errors/failures.dart';
 import 'package:openclaw_client/src/data/datasources/agent_remote_datasource.dart';
+import 'package:openclaw_client/src/data/local/database_helper.dart';
+import 'package:openclaw_client/src/data/local/agent_local_datasource.dart';
 import 'package:openclaw_client/src/data/models/agent_model.dart';
 import 'package:openclaw_client/src/data/repositories/agent_repository_impl.dart';
 import 'package:openclaw_client/src/domain/entities/agent.dart';
 
+import '../../helpers/sqflite_test_helper.dart';
+
 class MockAgentRemoteDataSource extends Mock implements AgentRemoteDataSource {}
 
 void main() {
-  setUpAll(() {
-    registerFallbackValue(AutonomyLevel.suggest);
-  });
+  initSqfliteFfi();
 
-  late MockAgentRemoteDataSource mockDataSource;
-  late AgentRepositoryImpl repository;
+  group('AgentRepositoryImpl (local-first)', () {
+    late DatabaseHelper dbHelper;
+    late AgentLocalDataSource localDataSource;
+    late MockAgentRemoteDataSource mockRemote;
+    late AgentRepositoryImpl repository;
 
-  final tAgentModel = AgentModel(
-    id: 'agent-1',
-    name: 'Test Agent',
-    defaultAutonomy: 'suggest',
-    isActive: true,
-  );
+    final tAgent = AgentModel(
+      id: 'agent-1',
+      name: 'Alpha',
+      description: 'Test agent',
+      capabilities: const ['chat'],
+      defaultAutonomy: 'suggest',
+      isActive: false,
+    );
 
-  final tAgent = Agent(
-    id: 'agent-1',
-    name: 'Test Agent',
-    defaultAutonomy: AutonomyLevel.suggest,
-    isActive: true,
-  );
-
-  setUp(() {
-    mockDataSource = MockAgentRemoteDataSource();
-    repository = AgentRepositoryImpl(remoteDataSource: mockDataSource);
-  });
-
-  group('getAgents', () {
-    test('should return Right(List<Agent>) on success', () async {
-      when(() => mockDataSource.getAgents()).thenAnswer((_) async => [tAgentModel]);
-
-      final result = await repository.getAgents();
-
-      expect(result.isRight(), isTrue);
-      result.fold(
-        (_) => fail('should be Right'),
-        (agents) {
-          expect(agents.length, 1);
-          expect(agents.first, equals(tAgent));
-        },
-      );
-      verify(() => mockDataSource.getAgents()).called(1);
+    setUp(() async {
+      dbHelper = DatabaseHelper();
+      await dbHelper.deleteDatabaseFile();
+      localDataSource = AgentLocalDataSource(dbHelper: dbHelper);
     });
 
-    test('should return Left(GatewayFailure) on GatewayException', () async {
-      when(() => mockDataSource.getAgents()).thenThrow(
-        const GatewayException('gateway error', code: 'ERR'),
-      );
-
-      final result = await repository.getAgents();
-
-      expect(
-        result,
-        equals(const Left<Failure, List<Agent>>(GatewayFailure('gateway error', code: 'ERR'))),
-      );
-      verify(() => mockDataSource.getAgents()).called(1);
+    tearDown(() async {
+      await dbHelper.close();
     });
 
-    test('should return Left(NetworkFailure) on ConnectionTimeoutException', () async {
-      when(() => mockDataSource.getAgents()).thenThrow(const ConnectionTimeoutException());
+    group('local-only (no remote)', () {
+      setUp(() {
+        repository = AgentRepositoryImpl(localDataSource: localDataSource);
+      });
 
-      final result = await repository.getAgents();
+      test('getAgents returns empty when no local data', () async {
+        final result = await repository.getAgents();
+        expect(result.isRight(), true);
+        result.fold(
+          (_) => fail('should be Right'),
+          (agents) => expect(agents, isEmpty),
+        );
+      });
 
-      expect(
-        result,
-        equals(const Left<Failure, List<Agent>>(NetworkFailure('Connection timed out', code: 'TIMEOUT'))),
-      );
-      verify(() => mockDataSource.getAgents()).called(1);
+      test('getAgents returns saved local agents', () async {
+        await localDataSource.saveAgent(tAgent);
+        final result = await repository.getAgents();
+        result.fold(
+          (_) => fail('should be Right'),
+          (agents) {
+            expect(agents.length, 1);
+            expect(agents.first.name, 'Alpha');
+          },
+        );
+      });
+
+      test('getAgentById returns local agent', () async {
+        await localDataSource.saveAgent(tAgent);
+        final result = await repository.getAgentById('agent-1');
+        expect(result.isRight(), true);
+        result.fold(
+          (_) => fail('should be Right'),
+          (agent) => expect(agent.name, 'Alpha'),
+        );
+      });
+
+      test('getAgentById returns StorageFailure when not found', () async {
+        final result = await repository.getAgentById('nonexistent');
+        expect(result.isLeft(), true);
+        result.fold(
+          (failure) => expect(failure, isA<StorageFailure>()),
+          (_) => fail('should be Left'),
+        );
+      });
+
+      test('updateAutonomy updates local agent', () async {
+        await localDataSource.saveAgent(tAgent);
+        final result = await repository.updateAutonomy('agent-1', AutonomyLevel.autonomous);
+        expect(result, equals(const Right<Failure, void>(null)));
+
+        final updated = await localDataSource.getAgentById('agent-1');
+        expect(updated.defaultAutonomy, 'autonomous');
+      });
+
+      test('toggleActive updates local agent', () async {
+        await localDataSource.saveAgent(tAgent);
+        final result = await repository.toggleActive('agent-1', true);
+        expect(result, equals(const Right<Failure, void>(null)));
+
+        final updated = await localDataSource.getAgentById('agent-1');
+        expect(updated.isActive, true);
+      });
+
+      test('watchAgents emits local agents', () async {
+        await localDataSource.saveAgent(tAgent);
+        final result = await repository.watchAgents().first;
+        expect(result.isRight(), true);
+        result.fold(
+          (_) => fail('should be Right'),
+          (agents) => expect(agents.first.id, 'agent-1'),
+        );
+      });
     });
 
-    test('should return Left(UnexpectedFailure) on unexpected error', () async {
-      when(() => mockDataSource.getAgents()).thenThrow(Exception('boom'));
+    group('with remote', () {
+      setUp(() {
+        mockRemote = MockAgentRemoteDataSource();
+        repository = AgentRepositoryImpl(
+          localDataSource: localDataSource,
+          remoteDataSource: mockRemote,
+        );
+      });
 
-      final result = await repository.getAgents();
+      test('getAgents returns local and background syncs remote', () async {
+        await localDataSource.saveAgent(tAgent);
+        final remoteAgent = AgentModel(
+          id: tAgent.id,
+          name: 'Remote Alpha',
+          description: tAgent.description,
+          capabilities: tAgent.capabilities,
+          defaultAutonomy: tAgent.defaultAutonomy,
+          isActive: tAgent.isActive,
+        );
+        when(() => mockRemote.getAgents()).thenAnswer((_) async => [remoteAgent]);
 
-      expect(result.isLeft(), isTrue);
-      result.fold(
-        (failure) => expect(failure.message, 'Unexpected error while getting agents'),
-        (_) => fail('should be Left'),
-      );
-      verify(() => mockDataSource.getAgents()).called(1);
-    });
-  });
+        final result = await repository.getAgents();
+        expect(result.isRight(), true);
+        result.fold(
+          (_) => fail('should be Right'),
+          (agents) => expect(agents.first.name, 'Alpha'),
+        );
 
-  group('getAgentById', () {
-    test('should return Right(Agent) on success', () async {
-      when(() => mockDataSource.getAgentById(any())).thenAnswer((_) async => tAgentModel);
+        await Future.delayed(const Duration(milliseconds: 200));
+        final localAfter = await localDataSource.getAgentById('agent-1');
+        expect(localAfter.name, 'Remote Alpha');
+      });
 
-      final result = await repository.getAgentById('agent-1');
+      test('getAgents silently ignores remote failure', () async {
+        await localDataSource.saveAgent(tAgent);
+        when(() => mockRemote.getAgents()).thenThrow(
+          const GatewayException('Remote error', code: 'REMOTE_ERR'),
+        );
 
-      expect(result, equals(Right<Failure, Agent>(tAgent)));
-      verify(() => mockDataSource.getAgentById('agent-1')).called(1);
-    });
+        final result = await repository.getAgents();
+        expect(result.isRight(), true);
+      });
 
-    test('should return Left(GatewayFailure) on GatewayException', () async {
-      when(() => mockDataSource.getAgentById(any())).thenThrow(
-        const GatewayException('not found', code: 'NOT_FOUND'),
-      );
+      test('getAgentById returns local and background refreshes', () async {
+        await localDataSource.saveAgent(tAgent);
+        final remoteAgent = AgentModel(
+          id: tAgent.id,
+          name: tAgent.name,
+          description: 'Remote desc',
+          capabilities: tAgent.capabilities,
+          defaultAutonomy: tAgent.defaultAutonomy,
+          isActive: tAgent.isActive,
+        );
+        when(() => mockRemote.getAgentById(any())).thenAnswer((_) async => remoteAgent);
 
-      final result = await repository.getAgentById('agent-1');
+        final result = await repository.getAgentById('agent-1');
+        expect(result.isRight(), true);
 
-      expect(
-        result,
-        equals(const Left<Failure, Agent>(GatewayFailure('not found', code: 'NOT_FOUND'))),
-      );
-      verify(() => mockDataSource.getAgentById('agent-1')).called(1);
-    });
+        await Future.delayed(const Duration(milliseconds: 200));
+        final localAfter = await localDataSource.getAgentById('agent-1');
+        expect(localAfter.description, 'Remote desc');
+      });
 
-    test('should return Left(NetworkFailure) on ConnectionTimeoutException', () async {
-      when(() => mockDataSource.getAgentById(any())).thenThrow(const ConnectionTimeoutException());
+      test('updateAutonomy local-first then syncs to remote', () async {
+        await localDataSource.saveAgent(tAgent);
+        when(() => mockRemote.updateAutonomy(any(), any())).thenAnswer((_) async {});
 
-      final result = await repository.getAgentById('agent-1');
+        final result = await repository.updateAutonomy('agent-1', AutonomyLevel.confirm);
+        expect(result, equals(const Right<Failure, void>(null)));
+        verify(() => mockRemote.updateAutonomy('agent-1', AutonomyLevel.confirm)).called(1);
+      });
 
-      expect(
-        result,
-        equals(const Left<Failure, Agent>(NetworkFailure('Connection timed out', code: 'TIMEOUT'))),
-      );
-      verify(() => mockDataSource.getAgentById('agent-1')).called(1);
-    });
+      test('updateAutonomy returns success even when remote fails', () async {
+        await localDataSource.saveAgent(tAgent);
+        when(() => mockRemote.updateAutonomy(any(), any())).thenThrow(Exception('boom'));
 
-    test('should return Left(UnexpectedFailure) on unexpected error', () async {
-      when(() => mockDataSource.getAgentById(any())).thenThrow(Exception('boom'));
+        final result = await repository.updateAutonomy('agent-1', AutonomyLevel.confirm);
+        expect(result, equals(const Right<Failure, void>(null)));
+      });
 
-      final result = await repository.getAgentById('agent-1');
+      test('toggleActive local-first then syncs to remote', () async {
+        await localDataSource.saveAgent(tAgent);
+        when(() => mockRemote.toggleActive(any(), any())).thenAnswer((_) async {});
 
-      expect(result.isLeft(), isTrue);
-      result.fold(
-        (failure) => expect(failure.message, 'Unexpected error while getting agent'),
-        (_) => fail('should be Left'),
-      );
-      verify(() => mockDataSource.getAgentById('agent-1')).called(1);
-    });
-  });
+        final result = await repository.toggleActive('agent-1', true);
+        expect(result, equals(const Right<Failure, void>(null)));
+        verify(() => mockRemote.toggleActive('agent-1', true)).called(1);
+      });
 
-  group('updateAutonomy', () {
-    test('should return Right(null) on success', () async {
-      when(() => mockDataSource.updateAutonomy(any(), any())).thenAnswer((_) async {});
+      test('watchAgents merges local and remote streams', () async {
+        await localDataSource.saveAgent(tAgent);
+        when(() => mockRemote.watchAgents()).thenAnswer(
+          (_) => Stream.fromIterable([
+            [AgentModel(
+              id: tAgent.id,
+              name: 'Remote Stream',
+              description: tAgent.description,
+              capabilities: tAgent.capabilities,
+              defaultAutonomy: tAgent.defaultAutonomy,
+              isActive: tAgent.isActive,
+            )],
+          ]),
+        );
 
-      final result = await repository.updateAutonomy('agent-1', AutonomyLevel.autonomous);
+        final results = await repository.watchAgents().take(2).toList();
+        expect(results.length, 2);
+        expect(results[0].isRight(), true);
+        expect(results[1].isRight(), true);
+      });
 
-      expect(result, equals(const Right<Failure, void>(null)));
-      verify(() => mockDataSource.updateAutonomy('agent-1', AutonomyLevel.autonomous)).called(1);
-    });
+      test('watchAgents emits NetworkFailure on ConnectionTimeoutException', () async {
+        when(() => mockRemote.watchAgents()).thenAnswer(
+          (_) => Stream.error(const ConnectionTimeoutException()),
+        );
 
-    test('should return Left(GatewayFailure) on GatewayException', () async {
-      when(() => mockDataSource.updateAutonomy(any(), any())).thenThrow(
-        const GatewayException('rejected', code: 'REJECTED'),
-      );
+        final result = await repository.watchAgents().first;
+        expect(result.isLeft(), true);
+        result.fold(
+          (failure) => expect(failure, isA<NetworkFailure>()),
+          (_) => fail('should be Left'),
+        );
+      });
 
-      final result = await repository.updateAutonomy('agent-1', AutonomyLevel.confirm);
+      test('watchAgents emits GatewayFailure on GatewayException', () async {
+        when(() => mockRemote.watchAgents()).thenAnswer(
+          (_) => Stream.error(
+            const GatewayException('GW err', code: 'GW'),
+          ),
+        );
 
-      expect(
-        result,
-        equals(const Left<Failure, void>(GatewayFailure('rejected', code: 'REJECTED'))),
-      );
-      verify(() => mockDataSource.updateAutonomy('agent-1', AutonomyLevel.confirm)).called(1);
-    });
-
-    test('should return Left(NetworkFailure) on ConnectionTimeoutException', () async {
-      when(() => mockDataSource.updateAutonomy(any(), any())).thenThrow(const ConnectionTimeoutException());
-
-      final result = await repository.updateAutonomy('agent-1', AutonomyLevel.observe);
-
-      expect(
-        result,
-        equals(const Left<Failure, void>(NetworkFailure('Connection timed out', code: 'TIMEOUT'))),
-      );
-      verify(() => mockDataSource.updateAutonomy('agent-1', AutonomyLevel.observe)).called(1);
-    });
-
-    test('should return Left(UnexpectedFailure) on unexpected error', () async {
-      when(() => mockDataSource.updateAutonomy(any(), any())).thenThrow(Exception('boom'));
-
-      final result = await repository.updateAutonomy('agent-1', AutonomyLevel.suggest);
-
-      expect(result.isLeft(), isTrue);
-      result.fold(
-        (failure) => expect(failure.message, 'Unexpected error while updating autonomy'),
-        (_) => fail('should be Left'),
-      );
-      verify(() => mockDataSource.updateAutonomy('agent-1', AutonomyLevel.suggest)).called(1);
-    });
-  });
-
-  group('toggleActive', () {
-    test('should return Right(null) on success', () async {
-      when(() => mockDataSource.toggleActive(any(), any())).thenAnswer((_) async {});
-
-      final result = await repository.toggleActive('agent-1', false);
-
-      expect(result, equals(const Right<Failure, void>(null)));
-      verify(() => mockDataSource.toggleActive('agent-1', false)).called(1);
-    });
-
-    test('should return Left(GatewayFailure) on GatewayException', () async {
-      when(() => mockDataSource.toggleActive(any(), any())).thenThrow(
-        const GatewayException('rejected', code: 'REJECTED'),
-      );
-
-      final result = await repository.toggleActive('agent-1', true);
-
-      expect(
-        result,
-        equals(const Left<Failure, void>(GatewayFailure('rejected', code: 'REJECTED'))),
-      );
-      verify(() => mockDataSource.toggleActive('agent-1', true)).called(1);
-    });
-
-    test('should return Left(NetworkFailure) on ConnectionTimeoutException', () async {
-      when(() => mockDataSource.toggleActive(any(), any())).thenThrow(const ConnectionTimeoutException());
-
-      final result = await repository.toggleActive('agent-1', true);
-
-      expect(
-        result,
-        equals(const Left<Failure, void>(NetworkFailure('Connection timed out', code: 'TIMEOUT'))),
-      );
-      verify(() => mockDataSource.toggleActive('agent-1', true)).called(1);
-    });
-
-    test('should return Left(UnexpectedFailure) on unexpected error', () async {
-      when(() => mockDataSource.toggleActive(any(), any())).thenThrow(Exception('boom'));
-
-      final result = await repository.toggleActive('agent-1', true);
-
-      expect(result.isLeft(), isTrue);
-      result.fold(
-        (failure) => expect(failure.message, 'Unexpected error while toggling active state'),
-        (_) => fail('should be Left'),
-      );
-      verify(() => mockDataSource.toggleActive('agent-1', true)).called(1);
-    });
-  });
-
-  group('watchAgents', () {
-    test('should emit Right(List<Agent>) on successful updates', () async {
-      when(() => mockDataSource.watchAgents()).thenAnswer(
-        (_) => Stream.value([tAgentModel]),
-      );
-
-      final result = repository.watchAgents();
-
-      final emitted = await result.first;
-      expect(emitted.isRight(), isTrue);
-      emitted.fold(
-        (_) => fail('should be Right'),
-        (agents) {
-          expect(agents.length, 1);
-          expect(agents.first, equals(tAgent));
-        },
-      );
-      verify(() => mockDataSource.watchAgents()).called(1);
-    });
-
-    test('should emit Left(GatewayFailure) on GatewayException in stream', () async {
-      when(() => mockDataSource.watchAgents()).thenAnswer(
-        (_) => Stream.error(const GatewayException('stream error', code: 'STREAM_ERR')),
-      );
-
-      final result = repository.watchAgents();
-
-      final emitted = await result.first;
-      expect(emitted.isLeft(), isTrue);
-      emitted.fold(
-        (failure) {
-          expect(failure, isA<GatewayFailure>());
-          expect(failure.message, 'stream error');
-        },
-        (_) => fail('should be Left'),
-      );
-      verify(() => mockDataSource.watchAgents()).called(1);
-    });
-
-    test('should emit Left(NetworkFailure) on ConnectionTimeoutException in stream', () async {
-      when(() => mockDataSource.watchAgents()).thenAnswer(
-        (_) => Stream.error(const ConnectionTimeoutException()),
-      );
-
-      final result = repository.watchAgents();
-
-      final emitted = await result.first;
-      expect(emitted.isLeft(), isTrue);
-      emitted.fold(
-        (failure) {
-          expect(failure, isA<NetworkFailure>());
-          expect(failure.message, 'Connection timed out');
-        },
-        (_) => fail('should be Left'),
-      );
-      verify(() => mockDataSource.watchAgents()).called(1);
-    });
-
-    test('should emit Left(UnexpectedFailure) on unexpected error in stream', () async {
-      when(() => mockDataSource.watchAgents()).thenAnswer(
-        (_) => Stream.error(Exception('stream boom')),
-      );
-
-      final result = repository.watchAgents();
-
-      final emitted = await result.first;
-      expect(emitted.isLeft(), isTrue);
-      emitted.fold(
-        (failure) {
-          expect(failure, isA<UnexpectedFailure>());
-          expect(failure.message, 'Unexpected error in watch stream');
-        },
-        (_) => fail('should be Left'),
-      );
-      verify(() => mockDataSource.watchAgents()).called(1);
+        final result = await repository.watchAgents().first;
+        expect(result.isLeft(), true);
+        result.fold(
+          (failure) => expect(failure, isA<GatewayFailure>()),
+          (_) => fail('should be Left'),
+        );
+      });
     });
   });
 }
