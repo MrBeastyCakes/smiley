@@ -32,3 +32,8 @@ class RetryCountUpdated extends ConnectionEvent {
   const RetryCountUpdated(this.retryCount);
   @override List<Object?> get props => [retryCount];
 }
+
+/// Internal event used to delay reconnecting UI for brief disconnects.
+class ReconnectingBannerDelayElapsed extends ConnectionEvent {
+  const ReconnectingBannerDelayElapsed();
+}

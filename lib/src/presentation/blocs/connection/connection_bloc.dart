@@ -15,11 +15,15 @@ part 'connection_event.dart';
 part 'connection_state.dart';
 
 class ConnectionBloc extends Bloc<ConnectionEvent, ConnectionState> {
+  static const _defaultReconnectingBannerDelay = Duration(milliseconds: 1500);
+
   final GatewayWebSocketClient? _client;
   final GatewayPingDataSource? _ping;
   final SyncCoordinator? _syncCoordinator;
+  final Duration _reconnectingBannerDelay;
   StreamSubscription? _statusSubscription;
   StreamSubscription? _retrySubscription;
+  Timer? _reconnectingBannerTimer;
   GatewaySettings? _lastSettings;
   int _retryCount = 0;
 
@@ -27,15 +31,18 @@ class ConnectionBloc extends Bloc<ConnectionEvent, ConnectionState> {
     GatewayWebSocketClient? client,
     GatewayPingDataSource? ping,
     SyncCoordinator? syncCoordinator,
+    Duration reconnectingBannerDelay = _defaultReconnectingBannerDelay,
   })  : _client = client ?? ServiceLocator.get<GatewayWebSocketClient>(),
         _ping = ping,
         _syncCoordinator = syncCoordinator,
+        _reconnectingBannerDelay = reconnectingBannerDelay,
         super(const ConnectionInitial()) {
     on<ConnectRequested>(_onConnectRequested);
     on<DisconnectRequested>(_onDisconnectRequested);
     on<ConnectionStatusChanged>(_onStatusChanged);
     on<RetryCountUpdated>(_onRetryCountUpdated);
     on<RetryNowRequested>(_onRetryNowRequested);
+    on<ReconnectingBannerDelayElapsed>(_onReconnectingBannerDelayElapsed);
   }
 
   Future<void> _onConnectRequested(ConnectRequested event, Emitter<ConnectionState> emit) async {
@@ -87,6 +94,7 @@ class ConnectionBloc extends Bloc<ConnectionEvent, ConnectionState> {
   }
 
   Future<void> _onDisconnectRequested(DisconnectRequested event, Emitter<ConnectionState> emit) async {
+    _cancelReconnectingBannerTimer();
     await _statusSubscription?.cancel();
     _statusSubscription = null;
     await _retrySubscription?.cancel();
@@ -98,8 +106,21 @@ class ConnectionBloc extends Bloc<ConnectionEvent, ConnectionState> {
 
   Future<void> _onRetryNowRequested(RetryNowRequested event, Emitter<ConnectionState> emit) async {
     if (_lastSettings == null) return;
+    _cancelReconnectingBannerTimer();
     emit(ConnectionReconnecting(settings: _lastSettings!, retryCount: 0));
     await _client?.retryNow();
+  }
+
+  Future<void> _onReconnectingBannerDelayElapsed(
+    ReconnectingBannerDelayElapsed event,
+    Emitter<ConnectionState> emit,
+  ) async {
+    if (_lastSettings == null) return;
+    if (state is ConnectionConnected || state is ConnectionOffline) return;
+    emit(ConnectionReconnecting(
+      settings: _lastSettings!,
+      retryCount: _retryCount,
+    ));
   }
 
   Future<void> _onRetryCountUpdated(RetryCountUpdated event, Emitter<ConnectionState> emit) async {
@@ -113,6 +134,7 @@ class ConnectionBloc extends Bloc<ConnectionEvent, ConnectionState> {
   Future<void> _onStatusChanged(ConnectionStatusChanged event, Emitter<ConnectionState> emit) async {
     switch (event.status) {
       case ConnectionStatus.connected:
+        _cancelReconnectingBannerTimer();
         _retryCount = 0;
         // Always emit Connected when we get a connected status —
         // covers both initial connect and auto-reconnect.
@@ -126,17 +148,13 @@ class ConnectionBloc extends Bloc<ConnectionEvent, ConnectionState> {
         break;
       case ConnectionStatus.disconnected:
         await _syncCoordinator?.stopSync();
-        // Don't kick user out to initial — show reconnecting banner instead.
-        if (_lastSettings != null && state is! ConnectionOffline && state is! ConnectionReconnecting) {
-          emit(ConnectionReconnecting(
-            settings: _lastSettings!,
-            retryCount: _retryCount,
-          ));
-        }
+        _scheduleReconnectingBanner();
         break;
       case ConnectionStatus.error:
+        _scheduleReconnectingBanner();
         // If we've hit max retries, show offline.
         if (_retryCount >= GatewayWebSocketClient.maxRetryAttempts && _lastSettings != null) {
+          _cancelReconnectingBannerTimer();
           emit(ConnectionOffline(settings: _lastSettings!));
           return;
         }
@@ -149,12 +167,7 @@ class ConnectionBloc extends Bloc<ConnectionEvent, ConnectionState> {
         }
         break;
       case ConnectionStatus.reconnecting:
-        if (_lastSettings != null && state is! ConnectionReconnecting) {
-          emit(ConnectionReconnecting(
-            settings: _lastSettings!,
-            retryCount: _retryCount,
-          ));
-        }
+        _scheduleReconnectingBanner();
         break;
       default:
         break;
@@ -163,9 +176,29 @@ class ConnectionBloc extends Bloc<ConnectionEvent, ConnectionState> {
 
   @override
   Future<void> close() async {
+    _cancelReconnectingBannerTimer();
     await _statusSubscription?.cancel();
     await _retrySubscription?.cancel();
     return super.close();
+  }
+
+  void _scheduleReconnectingBanner() {
+    if (_lastSettings == null || state is ConnectionOffline || state is ConnectionReconnecting) {
+      return;
+    }
+
+    if (_reconnectingBannerTimer?.isActive == true) return;
+
+    _reconnectingBannerTimer = Timer(_reconnectingBannerDelay, () {
+      if (!isClosed) {
+        add(const ReconnectingBannerDelayElapsed());
+      }
+    });
+  }
+
+  void _cancelReconnectingBannerTimer() {
+    _reconnectingBannerTimer?.cancel();
+    _reconnectingBannerTimer = null;
   }
 
   void _subscribeToClient() {
