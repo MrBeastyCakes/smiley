@@ -97,6 +97,15 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
   void _onMessageReceived(MessageReceived event, Emitter<ChatState> emit) {
     if (state is! ChatLoaded) return;
     final current = state as ChatLoaded;
+
+    final existingIndex = current.messages.indexWhere((m) => m.id == event.message.id);
+    if (existingIndex >= 0) {
+      final updated = List<ChatMessage>.from(current.messages);
+      updated[existingIndex] = event.message;
+      emit(ChatLoaded(messages: updated, isStreaming: false));
+      return;
+    }
+
     emit(ChatLoaded(messages: [...current.messages, event.message], isStreaming: false));
   }
 
@@ -138,7 +147,9 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     if (state is! ChatLoaded) return;
     final current = state as ChatLoaded;
     final pending = current.messages
-        .where((m) => m.isUser && m.status == MessageStatus.pending)
+        .where((m) =>
+            m.isUser &&
+            (m.status == MessageStatus.pending || m.status == MessageStatus.failed))
         .toList();
 
     if (pending.isEmpty) return;

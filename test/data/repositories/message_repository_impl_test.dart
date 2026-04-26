@@ -165,15 +165,19 @@ void main() {
         expect(local.any((m) => m.id == 'msg-confirmed'), true);
       });
 
-      test('sendMessage returns local pending when remote fails', () async {
+      test('sendMessage marks local message failed when remote fails', () async {
         when(() => mockRemote.sendMessage(any(), any())).thenThrow(Exception('boom'));
 
         final result = await repository.sendMessage('session-1', 'Hello');
         expect(result.isRight(), true);
         result.fold(
           (_) => fail('should be Right'),
-          (msg) => expect(msg.status, MessageStatus.pending),
+          (msg) => expect(msg.status, MessageStatus.failed),
         );
+
+        final local = await localDataSource.listMessages('session-1');
+        expect(local.length, 1);
+        expect(local.first.status, 'failed');
       });
 
       test('watchNewMessages merges local and remote', () async {
