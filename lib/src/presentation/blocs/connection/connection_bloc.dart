@@ -95,7 +95,9 @@ class ConnectionBloc extends Bloc<ConnectionEvent, ConnectionState> {
   Future<void> _onStatusChanged(ConnectionStatusChanged event, Emitter<ConnectionState> emit) async {
     switch (event.status) {
       case ConnectionStatus.connected:
-        if (state is ConnectionLoading || state is ConnectionError) {
+        // Always emit Connected when we get a connected status —
+        // covers both initial connect and auto-reconnect.
+        if (state is! ConnectionConnected) {
           emit(ConnectionConnected(settings: _lastSettings ?? const GatewaySettings(host: '', port: 0, token: '')));
         }
         // Start background sync when fully connected
@@ -108,10 +110,13 @@ class ConnectionBloc extends Bloc<ConnectionEvent, ConnectionState> {
         emit(const ConnectionInitial());
         break;
       case ConnectionStatus.error:
-        emit(const ConnectionError(
-          message: 'Connection lost. Tap Connect to retry.',
-          code: ConnectionErrorCode.unknown,
-        ));
+        // Only show error if we're not already showing one and not connected
+        if (state is! ConnectionError && state is! ConnectionConnected) {
+          emit(const ConnectionError(
+            message: 'Connection lost. Tap Connect to retry.',
+            code: ConnectionErrorCode.unknown,
+          ));
+        }
         break;
       case ConnectionStatus.reconnecting:
         break;

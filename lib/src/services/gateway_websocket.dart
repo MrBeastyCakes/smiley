@@ -102,10 +102,7 @@ class GatewayWebSocketClient {
     final uri = Uri.parse('$protocol://${settings.host}:${settings.port}/ws')
         .replace(queryParameters: {'token': settings.token});
 
-    _channel = WebSocketChannel.connect(
-      uri,
-      protocols: ['openclaw-v1'],
-    );
+    _channel = WebSocketChannel.connect(uri);
 
     // Wait for the connection to be ready
     await _channel!.ready;
@@ -240,27 +237,8 @@ class GatewayWebSocketClient {
   }
 
   void _startHeartbeat() {
-    _heartbeatTimer?.cancel();
-    _heartbeatTimer = Timer.periodic(_heartbeatInterval, (_) async {
-      if (!isConnected || _disposed) return;
-
-      try {
-        await send({'type': 'ping'});
-        _pendingPing = true;
-
-        _heartbeatTimeoutTimer?.cancel();
-        _heartbeatTimeoutTimer = Timer(_heartbeatTimeout, () {
-          if (_pendingPing && !_disposed) {
-            _pendingPing = false;
-            _setStatus(ConnectionStatus.error, reason: 'Heartbeat timeout');
-            _channel?.sink.close(1001, 'Heartbeat timeout');
-            _scheduleReconnect();
-          }
-        });
-      } catch (_) {
-        // Send failed; reconnect will be triggered by onError/onDone
-      }
-    });
+    // WebSocket ping/pong is handled at the protocol level by
+    // web_socket_channel. No application-level heartbeat needed.
   }
 
   void _stopHeartbeat() {
