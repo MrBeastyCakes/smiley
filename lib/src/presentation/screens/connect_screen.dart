@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:go_router/go_router.dart';
 
 import '../../core/di/service_locator.dart';
 import '../../core/theme/design_tokens.dart';
@@ -37,65 +36,56 @@ class _ConnectScreenState extends State<ConnectScreen> {
     return Scaffold(
       backgroundColor: tokens.bgDeep,
       body: SafeArea(
-        child: BlocListener<conn.ConnectionBloc, conn.ConnectionState>(
-          listener: _onStateChange,
-          child: SingleChildScrollView(
-            padding: EdgeInsets.all(tokens.space5),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                SizedBox(height: tokens.space6),
-                Text('OpenClaw', style: tokens.textTheme.displayMedium?.copyWith(color: tokens.accentGold)),
-                SizedBox(height: tokens.space2),
-                Text('Connect to your gateway', style: tokens.textTheme.bodyLarge?.copyWith(color: tokens.textSecondary)),
-                SizedBox(height: tokens.space6),
-                _buildField('Host', _hostController, tokens),
-                SizedBox(height: tokens.space4),
-                _buildField('Port', _portController, tokens, keyboardType: TextInputType.number),
-                SizedBox(height: tokens.space4),
-                _buildField('Token', _tokenController, tokens, obscure: true),
-                SizedBox(height: tokens.space4),
-                _ErrorBanner(),
-                SizedBox(height: tokens.space6),
-                SizedBox(
-                  width: double.infinity,
-                  child: BlocBuilder<conn.ConnectionBloc, conn.ConnectionState>(
-                    builder: (context, state) {
-                      final isLoading = state is conn.ConnectionLoading;
-                      return AurumButton(
-                        label: isLoading ? 'Connecting…' : 'Connect',
-                        variant: AurumButtonVariant.primary,
-                        fullWidth: true,
-                        isLoading: isLoading,
-                        onPressed: isLoading ? null : _connect,
-                      );
-                    },
-                  ),
+        child: SingleChildScrollView(
+          padding: EdgeInsets.all(tokens.space5),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              SizedBox(height: tokens.space6),
+              Text('OpenClaw', style: tokens.textTheme.displayMedium?.copyWith(color: tokens.accentGold)),
+              SizedBox(height: tokens.space2),
+              Text('Connect to your gateway', style: tokens.textTheme.bodyLarge?.copyWith(color: tokens.textSecondary)),
+              SizedBox(height: tokens.space6),
+              _buildField('Host', _hostController, tokens),
+              SizedBox(height: tokens.space4),
+              _buildField('Port', _portController, tokens, keyboardType: TextInputType.number),
+              SizedBox(height: tokens.space4),
+              _buildField('Token', _tokenController, tokens, obscure: true),
+              SizedBox(height: tokens.space4),
+              _ErrorBanner(),
+              SizedBox(height: tokens.space6),
+              SizedBox(
+                width: double.infinity,
+                child: BlocBuilder<conn.ConnectionBloc, conn.ConnectionState>(
+                  builder: (context, state) {
+                    final isLoading = state is conn.ConnectionLoading;
+                    return AurumButton(
+                      label: isLoading ? 'Connecting…' : 'Connect',
+                      variant: AurumButtonVariant.primary,
+                      fullWidth: true,
+                      isLoading: isLoading,
+                      onPressed: isLoading ? null : _connect,
+                    );
+                  },
                 ),
-                SizedBox(height: tokens.space3),
-                SizedBox(
-                  width: double.infinity,
-                  child: AurumButton(
-                    label: 'Scan QR Code',
-                    variant: AurumButtonVariant.secondary,
-                    fullWidth: true,
-                    icon: Icons.qr_code_scanner,
-                    onPressed: _scanQR,
-                  ),
+              ),
+              SizedBox(height: tokens.space3),
+              SizedBox(
+                width: double.infinity,
+                child: AurumButton(
+                  label: 'Scan QR Code',
+                  variant: AurumButtonVariant.secondary,
+                  fullWidth: true,
+                  icon: Icons.qr_code_scanner,
+                  onPressed: _scanQR,
                 ),
-                SizedBox(height: tokens.space4),
-              ],
-            ),
+              ),
+              SizedBox(height: tokens.space4),
+            ],
           ),
         ),
       ),
     );
-  }
-
-  void _onStateChange(BuildContext context, conn.ConnectionState state) {
-    if (state is conn.ConnectionConnected) {
-      context.pushReplacement('/home');
-    }
   }
 
   Widget _buildField(String label, TextEditingController controller, DesignTokens tokens, {bool obscure = false, TextInputType? keyboardType}) {
