@@ -12,7 +12,7 @@ import 'presentation/blocs/chat/chat_bloc.dart';
 import 'presentation/blocs/connection/connection_bloc.dart' as conn;
 import 'presentation/blocs/sessions/sessions_bloc.dart';
 import 'presentation/blocs/settings/settings_bloc.dart';
-import 'presentation/screens/agent_detail_screen.dart';
+import 'presentation/screens/agent_detail_loader_screen.dart';
 import 'presentation/screens/chat_screen.dart';
 import 'presentation/screens/connect_screen.dart';
 import 'presentation/screens/home_screen.dart';
@@ -35,98 +35,6 @@ class _ConnectionRefreshNotifier extends ChangeNotifier {
   void dispose() {
     _subscription?.cancel();
     super.dispose();
-  }
-}
-
-/// Loads an agent by route id and renders the detail screen.
-class AgentDetailLoaderScreen extends StatelessWidget {
-  final String agentId;
-  final AgentRepository repository;
-
-  const AgentDetailLoaderScreen({
-    super.key,
-    required this.agentId,
-    required this.repository,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return FutureBuilder(
-      future: repository.getAgentById(agentId),
-      builder: (context, snapshot) {
-        if (snapshot.connectionState != ConnectionState.done) {
-          return Scaffold(
-            appBar: AppBar(title: const Text('Loading agent')),
-            body: const Center(child: CircularProgressIndicator()),
-          );
-        }
-
-        if (snapshot.hasError) {
-          return _AgentRouteMessageState(
-            title: 'Unable to load agent',
-            message: 'Something went wrong while opening this agent. Please try again.',
-          );
-        }
-
-        final result = snapshot.data;
-        if (result == null) {
-          return _AgentRouteMessageState(
-            title: 'Unable to load agent',
-            message: 'No agent data was returned for id "$agentId".',
-          );
-        }
-
-        return result.fold(
-          (failure) {
-            final isNotFound = failure.message.toLowerCase().contains('not found');
-            return _AgentRouteMessageState(
-              title: isNotFound ? 'Agent not found' : 'Unable to load agent',
-              message: isNotFound
-                  ? 'No agent exists with id "$agentId".'
-                  : failure.message,
-            );
-          },
-          (agent) => AgentDetailScreen(agent: agent),
-        );
-      },
-    );
-  }
-}
-
-class _AgentRouteMessageState extends StatelessWidget {
-  final String title;
-  final String message;
-
-  const _AgentRouteMessageState({required this.title, required this.message});
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: Text(title)),
-      body: Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(message, textAlign: TextAlign.center),
-              const SizedBox(height: 16),
-              FilledButton.icon(
-                onPressed: () {
-                  if (context.canPop()) {
-                    context.pop();
-                    return;
-                  }
-                  context.go(AppRoute.home);
-                },
-                icon: const Icon(Icons.arrow_back),
-                label: const Text('Back'),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
   }
 }
 
@@ -206,6 +114,7 @@ class _OpenClawAppState extends State<OpenClawApp> {
             return AgentDetailLoaderScreen(
               agentId: agentId,
               repository: repository,
+              fallbackRoute: AppRoute.home,
             );
           },
         ),

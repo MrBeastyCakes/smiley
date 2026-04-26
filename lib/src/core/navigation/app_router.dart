@@ -2,8 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 
+import '../di/service_locator.dart';
+import '../../domain/repositories/agent_repository.dart';
 import '../../presentation/blocs/chat/chat_bloc.dart';
-import '../../presentation/screens/agent_detail_screen.dart';
+import '../../presentation/screens/agent_detail_loader_screen.dart';
 import '../../presentation/screens/chat_screen.dart';
 import '../../presentation/screens/connect_screen.dart';
 import '../../presentation/screens/home_screen.dart';
@@ -49,9 +51,11 @@ class AppRouter {
         GoRoute(
           path: Routes.agent,
           builder: (_, state) {
-            // TODO: fetch agent from repository via state.pathParameters['agentId']
-            return const Scaffold(
-              body: Center(child: Text('Agent detail')),
+            final agentId = state.pathParameters['agentId']!;
+            return AgentDetailLoaderScreen(
+              agentId: agentId,
+              repository: ServiceLocator.get<AgentRepository>(),
+              fallbackRoute: Routes.home,
             );
           },
         ),

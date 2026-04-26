@@ -12,6 +12,7 @@ import 'package:openclaw_client/src/domain/repositories/session_repository.dart'
 import 'package:openclaw_client/src/presentation/blocs/agents/agents_bloc.dart';
 import 'package:openclaw_client/src/presentation/blocs/connection/connection_bloc.dart' as conn;
 import 'package:openclaw_client/src/presentation/blocs/sessions/sessions_bloc.dart';
+import 'package:openclaw_client/src/presentation/screens/agent_detail_loader_screen.dart';
 import 'package:openclaw_client/src/presentation/screens/home_screen.dart';
 
 void main() {
