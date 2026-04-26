@@ -21,6 +21,7 @@ import '../../presentation/blocs/sessions/sessions_bloc.dart';
 import '../../presentation/blocs/settings/settings_bloc.dart';
 import '../../services/gateway_websocket.dart';
 import '../../services/notification_service.dart';
+import '../../services/voice_service.dart';
 
 /// Simple service locator for dependency injection.
 ///
@@ -63,6 +64,7 @@ class ServiceLocator {
 
     // ── Services ──────────────────────────────────
     final notificationService = NotificationService();
+    final voiceService = VoiceService();
 
     // ── Sync coordinator ──────────────────────────
     final syncCoordinator = SyncCoordinator(
@@ -94,6 +96,7 @@ class ServiceLocator {
     _container[MessageRepository] = messageRepository;
     _container[SessionRepository] = sessionRepository;
     _container[AgentRepository] = agentRepository;
+    _container[VoiceService] = voiceService;
 
     // ── BLoCs (created AFTER repositories are registered) ──
     final sessionsBloc = SessionsBloc(repository: sessionRepository);

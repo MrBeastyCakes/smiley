@@ -1,15 +1,25 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
+import '../../core/di/service_locator.dart';
 import '../../core/theme/design_tokens.dart';
 import '../../domain/entities/chat_message.dart';
+import '../../services/voice_service.dart';
 import '../blocs/chat/chat_bloc.dart';
 import '../blocs/connection/connection_bloc.dart' as conn;
 import '../widgets/widgets.dart';
 
 class ChatScreen extends StatefulWidget {
   final String sessionId;
-  const ChatScreen({super.key, required this.sessionId});
+  final VoiceService? voiceService;
+
+  const ChatScreen({
+    super.key,
+    required this.sessionId,
+    this.voiceService,
+  });
 
   @override
   State<ChatScreen> createState() => _ChatScreenState();
@@ -79,6 +89,7 @@ class _ChatScreenState extends State<ChatScreen> {
             sessionId: widget.sessionId,
             onSend: _send,
             tokens: tokens,
+            voiceService: widget.voiceService,
           ),
         ],
       ),
@@ -171,12 +182,14 @@ class _Composer extends StatefulWidget {
   final String sessionId;
   final VoidCallback onSend;
   final DesignTokens tokens;
+  final VoiceService? voiceService;
 
   const _Composer({
     required this.controller,
     required this.sessionId,
     required this.onSend,
     required this.tokens,
+    this.voiceService,
   });
 
   @override
@@ -186,10 +199,14 @@ class _Composer extends StatefulWidget {
 class _ComposerState extends State<_Composer> {
   bool _isRecording = false;
   String? _transcription;
+  String? _finalTranscription;
+  StreamSubscription<VoiceTranscription>? _transcriptionSub;
+  late final VoiceService _voiceService;
 
   @override
   void initState() {
     super.initState();
+    _voiceService = widget.voiceService ?? ServiceLocator.get<VoiceService>();
     widget.controller.addListener(_onTextChanged);
   }
 
@@ -204,6 +221,7 @@ class _ComposerState extends State<_Composer> {
 
   @override
   void dispose() {
+    _transcriptionSub?.cancel();
     widget.controller.removeListener(_onTextChanged);
     super.dispose();
   }
@@ -220,19 +238,67 @@ class _ComposerState extends State<_Composer> {
     }
   }
 
-  void _startRecording() {
+  Future<void> _startRecording() async {
+    _transcriptionSub?.cancel();
+    final isAvailable = await _voiceService.initialize();
+    if (!isAvailable) {
+      _showVoiceUnavailableMessage('Microphone permission is required to record.');
+      return;
+    }
+
+    _finalTranscription = null;
+    _transcription = null;
+    _transcriptionSub = _voiceService.transcriptionStream.listen(
+      (event) {
+        if (!mounted) return;
+        setState(() {
+          _transcription = event.text;
+          if (event.isFinal && event.text.trim().isNotEmpty) {
+            _finalTranscription = event.text.trim();
+          }
+        });
+        widget.controller.value = TextEditingValue(
+          text: event.text,
+          selection: TextSelection.collapsed(offset: event.text.length),
+        );
+      },
+      onError: (Object error) {
+        if (!mounted) return;
+        _showVoiceUnavailableMessage('Unable to transcribe voice right now.');
+        setState(() => _isRecording = false);
+      },
+    );
+
+    final started = await _voiceService.startListening();
+    if (!started) {
+      _showVoiceUnavailableMessage('Unable to start voice capture.');
+      await _transcriptionSub?.cancel();
+      _transcriptionSub = null;
+      return;
+    }
+    if (!mounted) return;
     setState(() => _isRecording = true);
-    // TODO: Wire to VoiceService for real transcription
   }
 
-  void _stopRecording() {
+  Future<void> _stopRecording() async {
+    await _voiceService.stopListening();
+    await _transcriptionSub?.cancel();
+    _transcriptionSub = null;
+    if (!mounted) return;
     setState(() => _isRecording = false);
-    if (_transcription != null && _transcription!.isNotEmpty) {
+
+    final finalText = _finalTranscription?.trim() ?? '';
+    if (finalText.isNotEmpty) {
       context.read<ChatBloc>().add(
-        MessageSent(sessionId: widget.sessionId, text: _transcription!),
+        MessageSent(sessionId: widget.sessionId, text: finalText),
       );
-      _transcription = null;
     }
+    _transcription = null;
+    _finalTranscription = null;
+  }
+
+  void _showVoiceUnavailableMessage(String text) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
   }
 
   @override
@@ -268,72 +334,17 @@ class _ComposerState extends State<_Composer> {
             ),
           ),
           SizedBox(width: tokens.space3),
-          if (_isRecording)
-            _RecordingIndicator(tokens: tokens)
-          else
-            IconButton(
-              onPressed: hasText ? widget.onSend : null,
-              icon: Icon(
-                hasText ? Icons.send : Icons.mic,
-                color: hasText ? tokens.accentGold : tokens.textMuted,
-              ),
+          IconButton(
+            onPressed: _isRecording ? _toggleVoice : (hasText ? widget.onSend : _toggleVoice),
+            icon: Icon(
+              _isRecording ? Icons.stop_circle_outlined : (hasText ? Icons.send : Icons.mic),
+              color: _isRecording
+                  ? tokens.statusError
+                  : (hasText ? tokens.accentGold : tokens.textMuted),
             ),
+          ),
         ],
       ),
-    );
-  }
-}
-
-class _RecordingIndicator extends StatefulWidget {
-  final DesignTokens tokens;
-  const _RecordingIndicator({required this.tokens});
-
-  @override
-  State<_RecordingIndicator> createState() => _RecordingIndicatorState();
-}
-
-class _RecordingIndicatorState extends State<_RecordingIndicator>
-    with SingleTickerProviderStateMixin {
-  late AnimationController _controller;
-
-  @override
-  void initState() {
-    super.initState();
-    _controller = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 800),
-    )..repeat(reverse: true);
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AnimatedBuilder(
-      animation: _controller,
-      builder: (context, child) {
-        return Container(
-          width: 40,
-          height: 40,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            color: widget.tokens.statusError.withValues(
-              alpha: 0.3 + (_controller.value * 0.4),
-            ),
-          ),
-          child: Center(
-            child: Icon(
-              Icons.mic,
-              color: widget.tokens.statusError,
-              size: 20,
-            ),
-          ),
-        );
-      },
     );
   }
 }
