@@ -57,6 +57,61 @@ void main() {
       ],
     );
 
+
+
+    blocTest<ChatBloc, ChatState>(
+      'retries failed user messages',
+      build: () => ChatBloc(repository: mockRepo),
+      seed: () => ChatLoaded(
+        messages: [
+          ChatMessage(
+            id: 'm-failed',
+            sessionId: sessionId,
+            role: 'user',
+            text: 'Need retry',
+            status: MessageStatus.failed,
+            timestamp: DateTime.now(),
+          ),
+        ],
+      ),
+      act: (bloc) => bloc.add(const RetryPendingMessages(sessionId: sessionId)),
+      expect: () => [
+        isA<ChatLoaded>().having((s) => (s as ChatLoaded).messages.length, 'count', 1),
+      ],
+    );
+
+    blocTest<ChatBloc, ChatState>(
+      'does not duplicate a received message with the same id',
+      build: () => ChatBloc(repository: mockRepo),
+      seed: () => ChatLoaded(
+        messages: [
+          ChatMessage(
+            id: 'm1',
+            sessionId: sessionId,
+            role: 'assistant',
+            text: 'Original',
+            timestamp: DateTime.now(),
+          ),
+        ],
+      ),
+      act: (bloc) => bloc.add(
+        MessageReceived(
+          ChatMessage(
+            id: 'm1',
+            sessionId: sessionId,
+            role: 'assistant',
+            text: 'Updated',
+            timestamp: DateTime.now(),
+          ),
+        ),
+      ),
+      expect: () => [
+        isA<ChatLoaded>()
+            .having((s) => (s as ChatLoaded).messages.length, 'count', 1)
+            .having((s) => s.messages.first.text, 'text', 'Updated'),
+      ],
+    );
+
     blocTest<ChatBloc, ChatState>(
       'streams assistant message chunks',
       build: () => ChatBloc(repository: mockRepo),

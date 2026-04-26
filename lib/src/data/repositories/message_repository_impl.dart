@@ -70,8 +70,23 @@ class MessageRepositoryImpl implements MessageRepository {
           await localDataSource.saveMessage(remoteModel);
           return Right(remoteModel.toEntity());
         } catch (_) {
-          // Remote failed — return the local pending message.
-          return Right(localModel.toEntity());
+          // Remote failed — mark local message failed so UI can show retry affordance.
+          final failedLocal = ChatMessageModel(
+            id: localModel.id,
+            sessionId: localModel.sessionId,
+            role: localModel.role,
+            text: localModel.text,
+            timestamp: localModel.timestamp,
+            status: 'failed',
+            editedAt: localModel.editedAt,
+            agentId: localModel.agentId,
+            thinking: localModel.thinking,
+            actionCards: localModel.actionCards,
+            attachments: localModel.attachments,
+            metadata: localModel.metadata,
+          );
+          await localDataSource.saveMessage(failedLocal);
+          return Right(failedLocal.toEntity());
         }
       }
 
@@ -85,10 +100,30 @@ class MessageRepositoryImpl implements MessageRepository {
 
   @override
   Stream<Either<Failure, ChatMessage>> watchNewMessages(String sessionId) {
-    // Local stream is authoritative; remote sync happens in background.
-    return localDataSource.watchNewMessages(sessionId).map(
+    final localStream = localDataSource.watchNewMessages(sessionId).map(
           (model) => Right<Failure, ChatMessage>(model.toEntity()),
         );
+
+    if (!_hasRemote) return localStream;
+
+    final remoteStream = remoteDataSource!.watchNewMessages(sessionId)
+        .asyncMap((model) async {
+          await localDataSource.saveMessage(model);
+          return Right<Failure, ChatMessage>(model.toEntity());
+        })
+        .transform(StreamTransformer.fromHandlers(
+          handleError: (error, stackTrace, sink) {
+            sink.add(
+              Left<Failure, ChatMessage>(
+                error is GatewayException
+                    ? GatewayFailure(error.message, code: error.code)
+                    : NetworkFailure('New message stream error: $error'),
+              ),
+            );
+          },
+        ));
+
+    return StreamGroup.merge([localStream, remoteStream]);
   }
 
   @override

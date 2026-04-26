@@ -8,6 +8,7 @@ import 'core/di/service_locator.dart';
 import 'core/navigation/app_router.dart';
 import 'core/theme/app_theme.dart';
 import 'domain/repositories/agent_repository.dart';
+import 'data/sync/sync_coordinator.dart';
 import 'presentation/blocs/agents/agents_bloc.dart';
 import 'presentation/blocs/chat/chat_bloc.dart';
 import 'presentation/blocs/connection/connection_bloc.dart' as conn;
@@ -56,7 +57,9 @@ class _OpenClawAppState extends State<OpenClawApp> {
   @override
   void initState() {
     super.initState();
-    _connectionBloc = conn.ConnectionBloc();
+    _connectionBloc = conn.ConnectionBloc(
+      syncCoordinator: ServiceLocator.get<SyncCoordinator>(),
+    );
     _chatBloc = ChatBloc(connectionBloc: _connectionBloc);
     _sessionsBloc = ServiceLocator.get<SessionsBloc>();
     _agentsBloc = ServiceLocator.get<AgentsBloc>();

@@ -155,11 +155,24 @@ class MessageLocalDataSource implements MessageRemoteDataSource {
 
   @override
   Stream<ChatMessageModel> watchNewMessages(String sessionId) {
+    ChatMessageModel? lastEmitted;
+
     return Stream.periodic(const Duration(seconds: 2))
         .asyncMap((_) => listMessages(sessionId))
         .map((list) => list.isNotEmpty ? list.last : null)
         .where((m) => m != null)
-        .cast<ChatMessageModel>();
+        .cast<ChatMessageModel>()
+        .where((message) {
+          final changed =
+              lastEmitted == null ||
+              lastEmitted!.id != message.id ||
+              lastEmitted!.status != message.status ||
+              lastEmitted!.text != message.text;
+          if (changed) {
+            lastEmitted = message;
+          }
+          return changed;
+        });
   }
 
   @override

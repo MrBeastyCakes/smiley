@@ -50,9 +50,8 @@ class SyncCoordinator {
 
   /// Begin background sync. Safe to call multiple times — subsequent calls
   /// are ignored while already syncing.
-  Future<void> startSync(GatewaySettings settings) async {
+  Future<void> startSync(GatewaySettings _settings) async {
     if (_syncing) return;
-    await client.connect(settings);
     if (!client.isConnected) return;
 
     _syncing = true;
@@ -86,14 +85,13 @@ class SyncCoordinator {
     _initialFullSync();
   }
 
-  /// Stop all sync subscriptions and disconnect the client.
+  /// Stop all sync subscriptions.
   Future<void> stopSync() async {
     for (final sub in _subscriptions) {
       await sub.cancel();
     }
     _subscriptions.clear();
     _syncing = false;
-    await client.disconnect();
   }
 
   // ── Internal helpers ─────────────────────────
