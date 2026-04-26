@@ -1,22 +1,22 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:openclaw_client/src/app.dart';
+import 'package:openclaw_client/src/core/navigation/app_router.dart';
 
 void main() {
-  group('AppRoute constants', () {
+  group('Routes constants', () {
     test('connect route is root', () {
-      expect(AppRoute.connect, '/');
+      expect(Routes.connect, '/');
     });
 
     test('home route is /home', () {
-      expect(AppRoute.home, '/home');
+      expect(Routes.home, '/home');
     });
 
     test('chat route has sessionId parameter', () {
-      expect(AppRoute.chat, '/chat/:sessionId');
+      expect(Routes.chat, '/chat/:sessionId');
     });
 
     test('agent route has agentId parameter', () {
-      expect(AppRoute.agent, '/agent/:agentId');
+      expect(Routes.agent, '/agent/:agentId');
     });
   });
 }

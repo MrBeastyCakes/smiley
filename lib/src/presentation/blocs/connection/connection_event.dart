@@ -14,3 +14,9 @@ class ConnectRequested extends ConnectionEvent {
 class DisconnectRequested extends ConnectionEvent {
   const DisconnectRequested();
 }
+
+class ConnectionStatusChanged extends ConnectionEvent {
+  final ConnectionStatus status;
+  const ConnectionStatusChanged(this.status);
+  @override List<Object?> get props => [status];
+}

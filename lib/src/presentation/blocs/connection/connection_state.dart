@@ -1,5 +1,17 @@
 part of 'connection_bloc.dart';
 
+/// Typed error codes for connection failures.
+enum ConnectionErrorCode {
+  none,
+  invalidHost,
+  connectionRefused,
+  networkUnreachable,
+  invalidToken,
+  timeout,
+  serverError,
+  unknown,
+}
+
 sealed class ConnectionState extends Equatable {
   const ConnectionState();
   @override List<Object?> get props => [];
@@ -21,6 +33,10 @@ class ConnectionConnected extends ConnectionState {
 
 class ConnectionError extends ConnectionState {
   final String message;
-  const ConnectionError({required this.message});
-  @override List<Object?> get props => [message];
+  final ConnectionErrorCode code;
+  const ConnectionError({
+    required this.message,
+    this.code = ConnectionErrorCode.unknown,
+  });
+  @override List<Object?> get props => [message, code];
 }

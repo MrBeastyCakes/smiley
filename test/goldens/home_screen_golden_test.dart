@@ -3,11 +3,13 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:golden_toolkit/golden_toolkit.dart';
 import 'package:openclaw_client/src/core/theme/app_theme.dart';
+import 'package:openclaw_client/src/core/di/service_locator.dart';
 import 'package:openclaw_client/src/presentation/blocs/connection/connection_bloc.dart';
 import 'package:openclaw_client/src/presentation/screens/home_screen.dart';
 
 void main() {
   testGoldens('HomeScreen renders all 3 tabs correctly', (tester) async {
+    ServiceLocator.init();
     final connectionBloc = ConnectionBloc();
 
     await tester.pumpWidgetBuilder(

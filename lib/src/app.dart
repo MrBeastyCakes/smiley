@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
@@ -18,6 +20,19 @@ abstract class AppRoute {
   static const agent = '/agent/:agentId';
 }
 
+/// Notifies GoRouter when connection state changes so redirects re-evaluate.
+class _ConnectionRefreshNotifier extends ChangeNotifier {
+  _ConnectionRefreshNotifier(conn.ConnectionBloc bloc) {
+    _subscription = bloc.stream.listen((_) => notifyListeners());
+  }
+  StreamSubscription? _subscription;
+  @override
+  void dispose() {
+    _subscription?.cancel();
+    super.dispose();
+  }
+}
+
 /// Root app widget with BLoC providers and GoRouter navigation.
 class OpenClawApp extends StatefulWidget {
   const OpenClawApp({super.key});
@@ -29,6 +44,7 @@ class OpenClawApp extends StatefulWidget {
 class _OpenClawAppState extends State<OpenClawApp> {
   late final conn.ConnectionBloc _connectionBloc;
   late final ChatBloc _chatBloc;
+  late final _ConnectionRefreshNotifier _refreshNotifier;
   late final GoRouter _router;
 
   @override
@@ -36,12 +52,24 @@ class _OpenClawAppState extends State<OpenClawApp> {
     super.initState();
     _connectionBloc = conn.ConnectionBloc();
     _chatBloc = ChatBloc();
+    _refreshNotifier = _ConnectionRefreshNotifier(_connectionBloc);
     _router = _createRouter();
   }
 
   GoRouter _createRouter() {
     return GoRouter(
       initialLocation: AppRoute.connect,
+      refreshListenable: _refreshNotifier,
+      redirect: (context, state) {
+        final connectionState = _connectionBloc.state;
+        final isConnected = connectionState is conn.ConnectionConnected;
+        final isOnHome = state.matchedLocation == AppRoute.home;
+        final isOnConnect = state.matchedLocation == AppRoute.connect;
+
+        if (isConnected && isOnConnect) return AppRoute.home;
+        if (!isConnected && isOnHome) return AppRoute.connect;
+        return null;
+      },
       routes: [
         GoRoute(
           path: AppRoute.connect,
@@ -64,7 +92,6 @@ class _OpenClawAppState extends State<OpenClawApp> {
         GoRoute(
           path: AppRoute.agent,
           builder: (_, state) {
-            // TODO: fetch real agent from repository
             return Scaffold(
               appBar: AppBar(title: const Text('Agent')),
               body: const Center(child: Text('Agent detail')),
@@ -72,21 +99,12 @@ class _OpenClawAppState extends State<OpenClawApp> {
           },
         ),
       ],
-      redirect: (context, state) {
-        final connectionState = _connectionBloc.state;
-        final isConnected = connectionState is conn.ConnectionConnected;
-        final isOnHome = state.matchedLocation == AppRoute.home;
-        final isOnConnect = state.matchedLocation == AppRoute.connect;
-
-        if (isConnected && isOnConnect) return AppRoute.home;
-        if (!isConnected && isOnHome) return AppRoute.connect;
-        return null;
-      },
     );
   }
 
   @override
   void dispose() {
+    _refreshNotifier.dispose();
     _connectionBloc.close();
     _chatBloc.close();
     super.dispose();
