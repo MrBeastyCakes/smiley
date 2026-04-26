@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
-import '../../core/di/service_locator.dart';
 import '../../core/theme/design_tokens.dart';
 import '../../domain/entities/chat_message.dart';
-import '../../services/voice_service.dart';
 import '../blocs/chat/chat_bloc.dart';
+import '../blocs/connection/connection_bloc.dart' as conn;
+import '../widgets/widgets.dart';
 
 class ChatScreen extends StatefulWidget {
   final String sessionId;
@@ -54,6 +54,7 @@ class _ChatScreenState extends State<ChatScreen> {
       ),
       body: Column(
         children: [
+          const ConnectionStatusBanner(),
           Expanded(
             child: BlocBuilder<ChatBloc, ChatState>(
               builder: (context, state) {
@@ -98,17 +99,70 @@ class _MessageBubble extends StatelessWidget {
       child: Container(
         constraints: BoxConstraints(maxWidth: MediaQuery.sizeOf(context).width * 0.82),
         margin: EdgeInsets.symmetric(vertical: tokens.space2),
-        padding: EdgeInsets.symmetric(horizontal: tokens.space4, vertical: tokens.space3),
-        decoration: BoxDecoration(
-          color: isUser ? tokens.accentGold.withValues(alpha: 0.15) : tokens.bgElevated,
-          borderRadius: BorderRadius.circular(tokens.radiusMd),
-          border: Border.all(color: isUser ? tokens.accentGold.withValues(alpha: 0.3) : tokens.textMuted.withValues(alpha: 0.1)),
+        child: Column(
+          crossAxisAlignment: isUser ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+          children: [
+            Container(
+              padding: EdgeInsets.symmetric(horizontal: tokens.space4, vertical: tokens.space3),
+              decoration: BoxDecoration(
+                color: isUser ? tokens.accentGold.withValues(alpha: 0.15) : tokens.bgElevated,
+                borderRadius: BorderRadius.circular(tokens.radiusMd),
+                border: Border.all(color: isUser ? tokens.accentGold.withValues(alpha: 0.3) : tokens.textMuted.withValues(alpha: 0.1)),
+              ),
+              child: Text(message.text, style: tokens.textTheme.bodyMedium?.copyWith(
+                color: isUser ? tokens.accentGold : tokens.textPrimary,
+              )),
+            ),
+            SizedBox(height: tokens.space1),
+            _StatusIndicator(message: message, tokens: tokens),
+          ],
         ),
-        child: Text(message.text, style: tokens.textTheme.bodyMedium?.copyWith(
-          color: isUser ? tokens.accentGold : tokens.textPrimary,
-        )),
       ),
     );
+  }
+}
+
+class _StatusIndicator extends StatelessWidget {
+  final ChatMessage message;
+  final DesignTokens tokens;
+  const _StatusIndicator({required this.message, required this.tokens});
+
+  @override
+  Widget build(BuildContext context) {
+    if (message.status == MessageStatus.pending) {
+      return SizedBox(
+        width: 12,
+        height: 12,
+        child: CircularProgressIndicator(
+          strokeWidth: 1.5,
+          color: tokens.textMuted,
+        ),
+      );
+    }
+    if (message.status == MessageStatus.failed) {
+      return Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.error_outline, size: 12, color: tokens.statusError),
+          SizedBox(width: tokens.space1),
+          GestureDetector(
+            onTap: () {
+              context.read<ChatBloc>().add(
+                RetryPendingMessages(sessionId: message.sessionId),
+              );
+            },
+            child: Text(
+              'Tap to retry',
+              style: tokens.textTheme.labelSmall?.copyWith(
+                color: tokens.statusError,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+        ],
+      );
+    }
+    return const SizedBox.shrink();
   }
 }
 

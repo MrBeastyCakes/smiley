@@ -19,7 +19,9 @@ class ConnectionBloc extends Bloc<ConnectionEvent, ConnectionState> {
   final GatewayPingDataSource? _ping;
   final SyncCoordinator? _syncCoordinator;
   StreamSubscription? _statusSubscription;
+  StreamSubscription? _retrySubscription;
   GatewaySettings? _lastSettings;
+  int _retryCount = 0;
 
   ConnectionBloc({
     GatewayWebSocketClient? client,
@@ -32,6 +34,8 @@ class ConnectionBloc extends Bloc<ConnectionEvent, ConnectionState> {
     on<ConnectRequested>(_onConnectRequested);
     on<DisconnectRequested>(_onDisconnectRequested);
     on<ConnectionStatusChanged>(_onStatusChanged);
+    on<RetryCountUpdated>(_onRetryCountUpdated);
+    on<RetryNowRequested>(_onRetryNowRequested);
   }
 
   Future<void> _onConnectRequested(ConnectRequested event, Emitter<ConnectionState> emit) async {
@@ -54,10 +58,8 @@ class ConnectionBloc extends Bloc<ConnectionEvent, ConnectionState> {
     // Step 2: WebSocket handshake
     try {
       await _client!.connect(event.settings);
-      _statusSubscription?.cancel();
-      _statusSubscription = _client!.statusStream.listen(
-        (status) => add(ConnectionStatusChanged(status)),
-      );
+      _retryCount = 0;
+      _subscribeToClient();
       // If already connected, emit immediately (the connected event may have
       // fired before we subscribed to the status stream).
       if (_client!.isConnected) {
@@ -87,14 +89,31 @@ class ConnectionBloc extends Bloc<ConnectionEvent, ConnectionState> {
   Future<void> _onDisconnectRequested(DisconnectRequested event, Emitter<ConnectionState> emit) async {
     await _statusSubscription?.cancel();
     _statusSubscription = null;
+    await _retrySubscription?.cancel();
+    _retrySubscription = null;
     await _syncCoordinator?.stopSync();
     await _client?.disconnect();
     emit(const ConnectionInitial());
   }
 
+  Future<void> _onRetryNowRequested(RetryNowRequested event, Emitter<ConnectionState> emit) async {
+    if (_lastSettings == null) return;
+    emit(ConnectionReconnecting(settings: _lastSettings!, retryCount: 0));
+    await _client?.retryNow();
+  }
+
+  Future<void> _onRetryCountUpdated(RetryCountUpdated event, Emitter<ConnectionState> emit) async {
+    _retryCount = event.retryCount;
+    if (state is ConnectionReconnecting) {
+      final s = state as ConnectionReconnecting;
+      emit(ConnectionReconnecting(settings: s.settings, retryCount: _retryCount));
+    }
+  }
+
   Future<void> _onStatusChanged(ConnectionStatusChanged event, Emitter<ConnectionState> emit) async {
     switch (event.status) {
       case ConnectionStatus.connected:
+        _retryCount = 0;
         // Always emit Connected when we get a connected status —
         // covers both initial connect and auto-reconnect.
         if (state is! ConnectionConnected) {
@@ -107,18 +126,35 @@ class ConnectionBloc extends Bloc<ConnectionEvent, ConnectionState> {
         break;
       case ConnectionStatus.disconnected:
         await _syncCoordinator?.stopSync();
-        emit(const ConnectionInitial());
+        // Don't kick user out to initial — show reconnecting banner instead.
+        if (_lastSettings != null && state is! ConnectionOffline && state is! ConnectionReconnecting) {
+          emit(ConnectionReconnecting(
+            settings: _lastSettings!,
+            retryCount: _retryCount,
+          ));
+        }
         break;
       case ConnectionStatus.error:
+        // If we've hit max retries, show offline.
+        if (_retryCount >= GatewayWebSocketClient.maxRetryAttempts && _lastSettings != null) {
+          emit(ConnectionOffline(settings: _lastSettings!));
+          return;
+        }
         // Only show error if we're not already showing one and not connected
         if (state is! ConnectionError && state is! ConnectionConnected) {
           emit(const ConnectionError(
-            message: 'Connection lost. Tap Connect to retry.',
+            message: 'Connection lost. Retrying...',
             code: ConnectionErrorCode.unknown,
           ));
         }
         break;
       case ConnectionStatus.reconnecting:
+        if (_lastSettings != null && state is! ConnectionReconnecting) {
+          emit(ConnectionReconnecting(
+            settings: _lastSettings!,
+            retryCount: _retryCount,
+          ));
+        }
         break;
       default:
         break;
@@ -128,7 +164,19 @@ class ConnectionBloc extends Bloc<ConnectionEvent, ConnectionState> {
   @override
   Future<void> close() async {
     await _statusSubscription?.cancel();
+    await _retrySubscription?.cancel();
     return super.close();
+  }
+
+  void _subscribeToClient() {
+    _statusSubscription?.cancel();
+    _retrySubscription?.cancel();
+    _statusSubscription = _client!.statusStream.listen(
+      (status) => add(ConnectionStatusChanged(status)),
+    );
+    _retrySubscription = _client!.retryCountStream.listen(
+      (count) => add(RetryCountUpdated(count)),
+    );
   }
 
   ConnectionErrorCode _mapSocketError(SocketException e) {

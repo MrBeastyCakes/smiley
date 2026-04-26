@@ -41,12 +41,19 @@ class _HomeScreenState extends State<HomeScreen> {
     return Scaffold(
       backgroundColor: tokens.bgDeep,
       body: SafeArea(
-        child: IndexedStack(
-          index: _currentIndex,
-          children: const [
-            _ChatTab(),
-            _AgentsTab(),
-            SettingsScreen(),
+        child: Column(
+          children: [
+            const ConnectionStatusBanner(),
+            Expanded(
+              child: IndexedStack(
+                index: _currentIndex,
+                children: const [
+                  _ChatTab(),
+                  _AgentsTab(),
+                  SettingsScreen(),
+                ],
+              ),
+            ),
           ],
         ),
       ),

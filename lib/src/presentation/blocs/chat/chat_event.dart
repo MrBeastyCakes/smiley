@@ -28,3 +28,28 @@ class MessageStreamed extends ChatEvent {
   const MessageStreamed({required this.sessionId, required this.chunk});
   @override List<Object?> get props => [sessionId, chunk];
 }
+
+class ConnectionRestored extends ChatEvent {
+  const ConnectionRestored();
+}
+
+/// Retry sending pending messages that failed while offline.
+class RetryPendingMessages extends ChatEvent {
+  final String sessionId;
+  const RetryPendingMessages({required this.sessionId});
+  @override List<Object?> get props => [sessionId];
+}
+
+/// Update message status after remote confirms receipt.
+class MessageStatusChanged extends ChatEvent {
+  final String messageId;
+  final MessageStatus newStatus;
+  const MessageStatusChanged({required this.messageId, required this.newStatus});
+  @override List<Object?> get props => [messageId, newStatus];
+}
+
+class LoadChatMessages extends ChatEvent {
+  final String sessionId;
+  const LoadChatMessages({required this.sessionId});
+  @override List<Object?> get props => [sessionId];
+}

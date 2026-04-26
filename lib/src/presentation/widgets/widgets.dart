@@ -5,3 +5,4 @@ export 'aurum_button.dart';
 export 'aurum_text_field.dart';
 export 'aurum_avatar.dart';
 export 'aurum_badge.dart';
+export 'connection_status_banner.dart';

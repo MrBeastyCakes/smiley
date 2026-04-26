@@ -57,7 +57,7 @@ class _OpenClawAppState extends State<OpenClawApp> {
   void initState() {
     super.initState();
     _connectionBloc = conn.ConnectionBloc();
-    _chatBloc = ChatBloc();
+    _chatBloc = ChatBloc(connectionBloc: _connectionBloc);
     _sessionsBloc = ServiceLocator.get<SessionsBloc>();
     _agentsBloc = ServiceLocator.get<AgentsBloc>();
     _settingsBloc = ServiceLocator.get<SettingsBloc>();
@@ -71,12 +71,18 @@ class _OpenClawAppState extends State<OpenClawApp> {
       refreshListenable: _refreshNotifier,
       redirect: (context, state) {
         final connectionState = _connectionBloc.state;
-        final isConnected = connectionState is conn.ConnectionConnected;
-        final isOnHome = state.matchedLocation == AppRoute.home;
+        final isFullyConnected = connectionState is conn.ConnectionConnected;
+        final hasBeenConnected = _connectionBloc.state is conn.ConnectionConnected ||
+                                   _connectionBloc.state is conn.ConnectionReconnecting ||
+                                   _connectionBloc.state is conn.ConnectionOffline;
         final isOnConnect = state.matchedLocation == AppRoute.connect;
 
-        if (isConnected && isOnConnect) return AppRoute.home;
-        if (!isConnected && isOnHome) return AppRoute.connect;
+        // Only redirect to home when first-time connected.
+        if (isFullyConnected && isOnConnect) return AppRoute.home;
+
+        // Only kick to connect screen if we've never connected at all.
+        // If reconnecting or offline, stay where the user is.
+        if (!hasBeenConnected && !isOnConnect) return AppRoute.connect;
         return null;
       },
       routes: [

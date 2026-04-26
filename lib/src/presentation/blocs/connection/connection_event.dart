@@ -15,8 +15,20 @@ class DisconnectRequested extends ConnectionEvent {
   const DisconnectRequested();
 }
 
+/// User tapped to retry connection after max retries exhausted.
+class RetryNowRequested extends ConnectionEvent {
+  const RetryNowRequested();
+}
+
 class ConnectionStatusChanged extends ConnectionEvent {
   final ConnectionStatus status;
   const ConnectionStatusChanged(this.status);
   @override List<Object?> get props => [status];
+}
+
+/// Emitted when the auto-retry attempt count changes.
+class RetryCountUpdated extends ConnectionEvent {
+  final int retryCount;
+  const RetryCountUpdated(this.retryCount);
+  @override List<Object?> get props => [retryCount];
 }

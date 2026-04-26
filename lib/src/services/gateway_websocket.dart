@@ -23,6 +23,7 @@ class GatewayWebSocketClient {
   static const _heartbeatTimeout = Duration(seconds: 10);
   static const _maxReconnectDelay = Duration(seconds: 30);
   static const _initialReconnectDelay = Duration(seconds: 1);
+  static const maxRetryAttempts = 10;
 
   final StreamController<ConnectionStatus> _statusController =
       StreamController<ConnectionStatus>.broadcast();
@@ -30,6 +31,8 @@ class GatewayWebSocketClient {
       StreamController<Map<String, dynamic>>.broadcast();
   final StreamController<Map<String, dynamic>> _requestController =
       StreamController<Map<String, dynamic>>.broadcast();
+  final StreamController<int> _retryCountController =
+      StreamController<int>.broadcast();
 
   WebSocketChannel? _channel;
   Timer? _heartbeatTimer;
@@ -44,6 +47,7 @@ class GatewayWebSocketClient {
   Duration _reconnectDelay = _initialReconnectDelay;
   bool _disposed = false;
   bool _pendingPing = false;
+  int _retryCount = 0;
 
   /// The current connection status.
   ConnectionStatus get status => _status;
@@ -59,6 +63,9 @@ class GatewayWebSocketClient {
 
   /// Stream of connection status changes.
   Stream<ConnectionStatus> get statusStream => _statusController.stream;
+
+  /// Stream of retry attempt count updates (0 = connected or not retrying).
+  Stream<int> get retryCountStream => _retryCountController.stream;
 
   /// Connects to the gateway using the provided settings.
   /// Retries with exponential backoff on failure.
@@ -82,9 +89,26 @@ class GatewayWebSocketClient {
       try {
         await _attemptConnection();
         _reconnectDelay = _initialReconnectDelay;
+        _retryCount = 0;
+        if (!_retryCountController.isClosed) {
+          _retryCountController.add(0);
+        }
         return;
       } catch (e) {
         if (_disposed) return;
+
+        _retryCount++;
+        if (!_retryCountController.isClosed) {
+          _retryCountController.add(_retryCount);
+        }
+
+        // After max retries, stop auto-reconnect and let the UI decide.
+        if (_retryCount >= maxRetryAttempts) {
+          _setStatus(ConnectionStatus.error,
+              reason: 'Connection lost after $maxRetryAttempts attempts. Tap to retry.');
+          return;
+        }
+
         _setStatus(ConnectionStatus.error, reason: 'Connection failed: $e');
         await Future.delayed(_reconnectDelay);
         if (_disposed) return;
@@ -224,6 +248,18 @@ class GatewayWebSocketClient {
     _cleanupConnection();
     if (_disposed || _settings == null) return;
 
+    // Check if we've exceeded max retries on auto-reconnect too.
+    _retryCount++;
+    if (!_retryCountController.isClosed) {
+      _retryCountController.add(_retryCount);
+    }
+
+    if (_retryCount >= maxRetryAttempts) {
+      _setStatus(ConnectionStatus.error,
+          reason: 'Connection lost after $maxRetryAttempts attempts. Tap to retry.');
+      return;
+    }
+
     _setStatus(ConnectionStatus.reconnecting);
 
     _reconnectTimer?.cancel();
@@ -289,6 +325,19 @@ class GatewayWebSocketClient {
       await _channel?.sink.close();
     } catch (_) {}
     _channel = null;
+  }
+
+  /// Manually retry after the connection has given up.
+  /// Resets the retry counter and attempts to reconnect immediately.
+  Future<void> retryNow() async {
+    if (_settings == null) return;
+    if (_disposed) return;
+    _retryCount = 0;
+    _reconnectDelay = _initialReconnectDelay;
+    if (!_retryCountController.isClosed) {
+      _retryCountController.add(0);
+    }
+    await _connectWithRetry();
   }
 
   void _setStatus(ConnectionStatus newStatus, {String? reason}) {
